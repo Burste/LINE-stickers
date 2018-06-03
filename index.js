@@ -26,7 +26,20 @@ const emojis = [
   '🐔',
   '🦋',
 ];
-let stopping = false;
+
+let stopping = 0;
+setInterval(() => {
+  if (stopping === 0) {
+    return;
+  }
+  if (stopping < Date.now()) {
+    process.exit();
+  }
+  var sec = Math.floor((stopping - Date.now()) / 1000);
+  if (sec % 5 === 0) {
+    console.log('Stop in ' + Math.floor((stopping - Date.now()) / 1000) + ' seconds');
+  }
+}, 1000);
 
 const bot1 = new TelegramBot(config.token1, {
   polling: true
@@ -34,18 +47,56 @@ const bot1 = new TelegramBot(config.token1, {
 
 const bot2 = new TelegramBot(config.token2);
 
+const userCD = {};
+
 bot1.on('message', (msg) => {
+  if (userCD[msg.from.id] !== undefined) {
+    if (Date.now() - userCD[msg.from.id] <  2 * 1000)
+      return;
+  }
+  userCD[msg.from.id] = Date.now();
+
   console.log(msg);
 
   if (msg.sticker !== undefined) {
     var text = '您的使用者編號: <code>' + msg.from.id + '</code>\n';
-    text += '貼圖包編號: <code>' + msg.sticker.set_name + '</code>\n';
-    text += '貼圖表符: ' + msg.sticker.emoji + ' (<a href="http://telegra.ph/Sticker-emoji-06-03">修改教學</a>)\n';
+    if (msg.sticker.set_name !== undefined) {
+      text += '貼圖包編號: <code>' + msg.sticker.set_name + '</code>\n';
+      text += '貼圖表符: ' + msg.sticker.emoji + ' (<a href="http://telegra.ph/Sticker-emoji-06-03">編輯</a>)\n';
+    }
     text += '貼圖大小: <b>' + msg.sticker.width + '</b>x<b>' + msg.sticker.height + '</b>\n';
     bot1.sendMessage(msg.chat.id, text, {
       reply_to_message_id: msg.message_id,
       parse_mode: 'HTML'
     });
+
+    if (msg.sticker.set_name !== undefined) {
+      var found = msg.sticker.set_name.match(/^line(\d+)_by_Sean_Bot$/);
+      if (found) {
+        const lid = found[1];
+        const meta = JSON.parse(fs.readFileSync('files/' + lid + '/metadata', 'utf8'));
+        bot2.getStickerSet(msg.sticker.set_name)
+        .then((set) => {
+          if (set.stickers.length !== meta.stickers.length) {
+            var text = '<a href="https://t.me/addstickers/' + msg.sticker.set_name + '">這包貼圖</a>怪怪的，要砍掉重練嗎？\n';
+            bot1.sendMessage(msg.chat.id, text, {
+              reply_to_message_id: msg.message_id,
+              parse_mode: 'HTML',
+              reply_markup: {
+                inline_keyboard: [
+                  [
+                    {
+                      text: '當然 砍了他 😈',
+                      callback_data: 'remove_' + lid
+                    }
+                  ]
+                ]
+              }
+            });
+          }
+        });
+      }
+    }
     return;
   }
 
@@ -56,12 +107,12 @@ bot1.on('message', (msg) => {
     if (config.admins.indexOf(msg.from.id) < 0)
       return;
 
-    stopping = !stopping;
-
     var text = '指令生效\n';
-    if (stopping) {
+    if (stopping === 0) {
+      stopping = Date.now() + 60 * 1000;
       text += '已開啟停機模式';
     } else {
+      stopping = 0;
       text += '已恢復正常模式';
     }
     bot1.sendMessage(msg.chat.id, text, {
@@ -149,13 +200,17 @@ bot1.on('message', (msg) => {
     return;
   }
 
-  if (stopping) {
-    var text = '⚠️ 機器人要下班了\n';
-    text += '機器人已排程關閉，為了維護貼圖包品質，請過三分鐘後再重新下載一次\n';
+  const lid = found[1];
+
+  if (stopping > 0) {
+    var text = '⚠️ 機器人要下班了\n\n';
+    text += '機器人已排程重啟，為了維護貼圖包品質，將拒收新請求\n';
+    text += '請過 <b>' + Math.floor((stopping - Date.now()) / 1000) + '</b> 秒後再點 /line_' + lid + ' 開始下載\n\n';
     text += '如有造成不便，我也不能怎樣 ¯\\_(ツ)_/¯';
 
     bot1.sendMessage(msg.chat.id, text, {
       reply_to_message_id: msg.message_id,
+      parse_mode: 'HTML',
       reply_markup: {
         inline_keyboard: [
           [
@@ -170,7 +225,6 @@ bot1.on('message', (msg) => {
     return;
   }
 
-  const lid = found[1];
   var text = '準備下載 <a href="https://store.line.me/stickershop/product/' + lid + '/zh-Hant">此貼圖</a>...';
   msg.timestamp = Date.now();
   bot1.sendMessage(msg.chat.id, text, {
@@ -188,35 +242,7 @@ bot1.on('message', (msg) => {
       meta.error = [];
 
       if (meta.done !== undefined) {
-        if (meta.done.length < meta.stickers.length) {
-          var stat1 = fs.statSync('files/' + lid);
-          var stat2 = fs.statSync('files/' + lid + '/metadata');
-          if (Date.now() - stat1.mtimeMs < 1 * 60 * 1000
-           && Date.now() - stat2.mtimeMs < 1 * 60 * 1000) {
-            var text = '已中斷下載，請五分鐘後重試\n'
-            text += '可能原因：他人正在下載同款貼圖包\n';
-            if (meta.done != undefined) {
-              text += prog(meta.done.length, meta.stickers.length);
-            }
-            bot1.editMessageText(text, {
-              chat_id: msg.chat.id,
-              message_id: msg.msgId,
-              parse_mode: 'HTML'
-            });
-          } else {
-              var text = '路邊撿到半包貼圖，接續上傳 💪\n';
-            if (meta.done.length > 0) {
-              text += prog(meta.done.length, meta.stickers.length);
-              text += '預覽連結: <a href="https://t.me/addstickers/' + meta.name + '">' + enHTML(meta.title) + '</a>\n';
-            }
-            bot1.editMessageText(text, {
-              chat_id: msg.chat.id,
-              message_id: msg.msgId,
-              parse_mode: 'HTML'
-            });
-            uploadBody(msg, lid);
-          }
-        } else {
+        if (meta.done.length == meta.stickers.length) {
           text = '<a href="https://t.me/addstickers/' + meta.name + '">' + enHTML(meta.title) + '</a> 已存在';
           bot1.editMessageText(text, {
             chat_id: msg.chat.id,
@@ -245,15 +271,18 @@ bot1.on('message', (msg) => {
           bot2.getStickerSet('line' + lid + '_by_' + config.botName2)
           .then((set) => {
             if (set.stickers.length !== meta.stickers.length) {
-              bot1.editMessageReplyMarkup({
+              var text = '前次下載失敗，請先試試看<a href="https://t.me/addstickers/' + meta.name + '">這包貼圖</a>\n';
+              text += '如有問題，就砍掉重練吧 :D\n';
+              bot1.editMessageText(text, {
                 chat_id: msg.chat.id,
                 message_id: msg.msgId,
+                parse_mode: 'HTML',
                 reply_markup: {
                   inline_keyboard: [
                     [
                       {
                         text: '砍掉重練 😈',
-                        'callback_data': 'remove_' + lid
+                        callback_data: 'remove_' + lid
                       }
                     ]
                   ]
@@ -261,73 +290,108 @@ bot1.on('message', (msg) => {
               });
             }
           });
+          return;
         }
-        return;
-      }
-    }
-    
-    var zipname = 'files/' + lid + '/file.zip';
-    var req = request('http://dl.stickershop.line.naver.jp/products/0/0/1/' + lid + '/iphone/stickers@2x.zip')
-    .on('error', function (err) {
-      msg.timestamp = Date.now() + 9487 * 1000;
-      var text = '發生錯誤，已中斷下載\n';
-      text += '詳細報告: NodeJS <b>request</b> onError\n';
-      text += '<pre>' + enHTML(JSON.stringify(err)) + '</pre>';
-      bot1.editMessageText(text, {
-        chat_id: msg.chat.id,
-        message_id: msg.msgId,
-        parse_mode: 'HTML'
-      });
-    })
-    .pipe(fs.createWriteStream(zipname))
-    .on('finish', function (fin) {
-      if (msg.timestamp > Date.now())
-        return;
 
-      var zipStat = fs.statSync(zipname);
-      if (zipStat.size < 69) {
-        var zipText = fs.readFileSync(zipname);
-        msg.timestamp = Date.now() + 9487 * 1000;
-        var text = '發生錯誤，已中斷下載\n';
-        text += '詳細報告: LINE 伺服器提供檔案不正常\n';
-        text += '下載內容:\n'
-        text += '<pre>' + enHTML(zipText) + '</pre>';
+        var stat1 = fs.statSync('files/' + lid);
+        var stat2 = fs.statSync('files/' + lid + '/metadata');
+        var mtime = Math.max(stat1.mtimeMs, stat2.mtimeMs);
+        var sec = Math.floor((mtime - Date.now()) / 1000) + 60;
+        if (sec > 0) {
+          var text = '已中斷下載\n'
+          text += '可能原因: 他人正在下載同款貼圖包\n';
+          if (meta.done != undefined) {
+            text += prog(meta.done.length, meta.stickers.length);
+          }
+          text += '\n冷卻時間: <b>' + sec + '</b> 秒\n';
+          text += '點擊 /line_' + lid + ' 指令重試\n';
+          bot1.editMessageText(text, {
+            chat_id: msg.chat.id,
+            message_id: msg.msgId,
+            parse_mode: 'HTML'
+          });
+          return;
+        }
+
+        var text = '路邊撿到半包貼圖，接續上傳 💪\n';
+        if (meta.done.length > 0) {
+          text += prog(meta.done.length, meta.stickers.length);
+          if (meta.done.length / meta.stickers.length >= 0.7) {
+            text += '預覽連結: <a href="https://t.me/addstickers/' + meta.name + '">' + enHTML(meta.title) + '</a>\n';
+          }
+        }
         bot1.editMessageText(text, {
           chat_id: msg.chat.id,
           message_id: msg.msgId,
           parse_mode: 'HTML'
         });
+        uploadBody(msg, lid);
+        return;
+      }
+    }
+
+  var zipname = 'files/' + lid + '/file.zip';
+  var req = request('http://dl.stickershop.line.naver.jp/products/0/0/1/' + lid + '/iphone/stickers@2x.zip')
+  .on('error', function (err) {
+    msg.timestamp = Date.now() + 9487 * 1000;
+    var text = '發生錯誤，已中斷下載\n';
+    text += '詳細報告: NodeJS <b>request</b> onError\n';
+    text += '<pre>' + enHTML(JSON.stringify(err)) + '</pre>';
+    bot1.editMessageText(text, {
+      chat_id: msg.chat.id,
+      message_id: msg.msgId,
+      parse_mode: 'HTML'
+    });
+  })
+  .pipe(fs.createWriteStream(zipname))
+  .on('finish', function (fin) {
+    if (msg.timestamp > Date.now())
+      return;
+
+    var zipStat = fs.statSync(zipname);
+    if (zipStat.size < 69) {
+      var zipText = fs.readFileSync(zipname);
+      msg.timestamp = Date.now() + 9487 * 1000;
+      var text = '發生錯誤，已中斷下載\n';
+      text += '詳細報告: LINE 伺服器提供檔案不正常\n';
+      text += '下載內容:\n'
+      text += '<pre>' + enHTML(zipText) + '</pre>';
+      bot1.editMessageText(text, {
+        chat_id: msg.chat.id,
+        message_id: msg.msgId,
+        parse_mode: 'HTML'
+      });
+      return;
+    }
+
+    fs.createReadStream(zipname)
+    .pipe(unzip.Parse())
+    .on('entry', function (entry) {
+      var fileName = entry.path;
+
+      if (fileName == 'productInfo.meta') {
+        entry.pipe(fs.createWriteStream('files/' + lid + '/metadata'));
         return;
       }
 
-      fs.createReadStream(zipname)
-      .pipe(unzip.Parse())
-      .on('entry', function (entry) {
-        var fileName = entry.path;
+      if (/\d+@2x.png/.test(fileName)) {
+        entry.pipe(fs.createWriteStream('files/' + lid + '/origin-' + fileName.replace('@2x', '')));
+        return;
+      }
 
-        if (fileName == 'productInfo.meta') {
-          entry.pipe(fs.createWriteStream('files/' + lid + '/metadata'));
-          return;
-        }
+      if (/(\d+_key|tab_(on|off))@2x.png/.test(fileName)) {
+        entry.autodrain();
+        return;
+      }
 
-        if (/\d+@2x.png/.test(fileName)) {
-          entry.pipe(fs.createWriteStream('files/' + lid + '/origin-' + fileName.replace('@2x', '')));
-          return;
-        }
-
-        if (/(\d+_key|tab_(on|off))@2x.png/.test(fileName)) {
-          entry.autodrain();
-          return;
-        }
-        
-        entry.pipe(fs.createWriteStream('files/' + lid + '/UNKNOWN-' + fileName));
-      })
-      .on('finish', function () {
+      entry.pipe(fs.createWriteStream('files/' + lid + '/UNKNOWN-' + fileName));
+    })
+    .on('finish', function () {
         const meta = JSON.parse(fs.readFileSync('files/' + lid + '/metadata', 'utf8'));
         meta.error = [];
 
         meta.name = 'line' + lid + '_by_' + config.botName2;
-        
+
         const langs = [
           'zh-Hant',
           'ja',
@@ -393,7 +457,7 @@ bot1.on('message', (msg) => {
                     [
                       {
                         text: '砍掉重練 😈',
-                        'callback_data': 'remove_' + lid
+                        callback_data: 'remove_' + lid
                       }
                     ]
                   ]
@@ -483,8 +547,10 @@ function uploadBody(msg, lid) {
         var text = '發生錯誤，請五分鐘後再試\n';
         if (error.message.includes('user not found')) {
           text += '請確定 <a href="https://t.me/' + config.botName2 + '">已於此啟動過機器人</a>\n';
+          text += '點擊 /line_' + lid + ' 重試\n';
         } else if (error.message.includes('retry after')) {
           text += '上傳速度太快啦，TG 伺服器要冷卻一下\n';
+          text += '點擊 /line_' + lid + ' 重試\n';
         } else if (error.message.includes('STICKERS_TOO_MUCH')) {
           text += '貼圖數量衝破天際啦~\n';
         }
@@ -533,7 +599,7 @@ function uploadBody(msg, lid) {
                 [
                   {
                     text: '分享給朋友',
-                    url: 'https://t.me/share/url?'
+                    url: 'https://t.me/share/url'
                     + '?url=' + encodeURIComponent('https://t.me/addstickers/' + meta.name)
                     + '&text=' + encodeURIComponent(meta.title + '\n剛出爐的呦~')
                   }
@@ -545,7 +611,7 @@ function uploadBody(msg, lid) {
           msg.timestamp = Date.now();
           var text = '上傳 <a href="https://store.line.me/stickershop/product/' + lid + '/' + meta['lang'] + '">' + enHTML(meta.title) + '</a> 中...\n';
           text += prog(meta.done.length, meta.stickers.length);
-          if (meta.stickers.length - meta.done.length <= 10) {
+          if (meta.done.length / meta.stickers.length >= 0.7) {
             text += '預覽連結: <a href="https://t.me/addstickers/' + meta.name + '">' + enHTML(meta.title) + '</a>\n';
           }
           bot1.editMessageText(text, {
@@ -564,6 +630,12 @@ function uploadBody(msg, lid) {
 
 
 bot1.on('callback_query', (query) => {
+  if (userCD[query.from.id] !== undefined) {
+    if (Date.now() - userCD[query.from.id] <  2 * 1000)
+      return;
+  }
+  userCD[query.from.id] = Date.now();
+
   if (query.data.startsWith('remove_')) {
     lid = query.data.substr(7);
 
@@ -574,21 +646,33 @@ bot1.on('callback_query', (query) => {
     bot2.getStickerSet('line' + lid + '_by_' + config.botName2)
     .then((set) => {
       if (meta.done !== undefined) {
+        var text = '';
+
         var stat1 = fs.statSync('files/' + lid);
         var stat2 = fs.statSync('files/' + lid + '/metadata');
-        if (((Date.now() - stat1.mtimeMs < 1 * 60 * 1000
-          && Date.now() - stat2.mtimeMs < 1 * 60 * 1000)
-          || meta.stickers.length !== meta.done.length
-          || meta.stickers.length === set.stickers.length)
-          && config.admins.indexOf(query.from.id) < 0) {
+        if (Date.now() - stat1.mtimeMs < 1 * 60 * 1000
+         || Date.now() - stat2.mtimeMs < 1 * 60 * 1000) {
+          text = '冷卻中，請三分鐘後再點一次';
+        }
+
+        if (meta.stickers.length !== meta.done.length
+                || meta.stickers.length === set.stickers.length) {
+          text = '看起來沒問題呀\n如真的怪怪的，請至群組提出'
+        }
+
+        if (config.admins.indexOf(query.from.id) > -1) {
+          text = '';
+        }
+
+        if (text !== '') {
           bot1.answerCallbackQuery(query.id, {
-            text: '權限不足\n如貼圖包有問題，請至群組提出',
+            text: text,
             show_alert: 'true'
           });
           return;
         }
       }
-      
+
       console.warn(query);
 
       if (meta.origin_title === undefined) {
@@ -613,19 +697,30 @@ bot1.on('callback_query', (query) => {
       }
       meta.done = [];
 
-      console.log(set);  
       for (var i=0; i<set.stickers.length; i++) {
         console.log('Removing...', set.stickers[i].file_id);
         bot2.deleteStickerFromSet(set.stickers[i].file_id);
       }
 
-      var text = '已移除<b>' + meta.title + '</b>\n';
-      text += '如要重新下載，請點擊 /line_' + lid + ' 指令';
-      bot1.editMessageText(text, {
-        chat_id: query.message.chat.id,
-        message_id: query.message.message_id,
-        parse_mode: 'HTML'
-      });
+      if (!query.message.text.includes('已清空')) {
+        var text = '已清空 <a href="https://t.me/addstickers/' + meta.name + '">' + meta.title + '</a>\n';
+        text += '確認顯示「找不到貼圖包」後，請等待三分鐘，並點擊 /line_' + lid + ' 重新下載指令';
+        bot1.editMessageText(text, {
+          chat_id: query.message.chat.id,
+          message_id: query.message.message_id,
+          parse_mode: 'HTML',
+          reply_markup: {
+            inline_keyboard: [
+              [
+                {
+                  text: '他不是空的 😰',
+                  callback_data: 'remove_' + lid
+                }
+              ]
+            ]
+          }
+        });
+      }
 
       fs.writeFile('files/' + lid + '/metadata', JSON.stringify(meta), (error) => { if (error) console.error(error) });
 
@@ -665,7 +760,7 @@ function prog(current, total) {
     current = total;
   }
   const count = 20;
-  var str = '進度: <b>' + current + '</b>/' + total + '  <code>[';
+  var str = '下載進度: <b>' + current + '</b>/' + total + '  <code>[';
   str += '█'.repeat(Math.round(current * count / total))
   str += '-'.repeat(count - Math.round(current * count / total))
   str += ']</code>\n'
