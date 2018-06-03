@@ -5,7 +5,7 @@ while true; do
 	date
 	node . \
 		|tee logs/log_`date '+%m-%d_%H-%M-%S'`
-	for _ in {1..5}; do
+	for _ in {1..3}; do
 		echo -e "CRASHED\x07"
 		sleep 1
 	done

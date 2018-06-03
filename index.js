@@ -27,17 +27,26 @@ const emojis = [
   '🦋',
 ];
 
-let restring = 0;
+const langs = [
+  'zh-Hant',
+  'ja',
+  'zh-Hans',
+  'en',
+  'ko'
+];
+
+let restarting = 0;
+
 setInterval(() => {
-  if (restring === 0) {
+  if (restarting === 0) {
     return;
   }
-  if (restring < Date.now()) {
+  if (restarting < Date.now()) {
     process.exit();
   }
-  var sec = Math.floor((restring - Date.now()) / 1000);
+  var sec = Math.floor((restarting - Date.now()) / 1000);
   if (sec % 5 === 0) {
-    console.log('Restart in ' + Math.floor((restring - Date.now()) / 1000) + ' seconds');
+    console.log('Restart in ' + Math.floor((restarting - Date.now()) / 1000) + ' seconds');
   }
 }, 1000);
 
@@ -103,16 +112,20 @@ bot1.on('message', (msg) => {
   if (msg.text === undefined)
     return;
 
-  if (msg.text === '/restart') {
+  if (msg.text.startsWith('/restart')) {
     if (config.admins.indexOf(msg.from.id) < 0)
       return;
 
     var text = '指令生效\n';
-    if (restring === 0) {
-      restring = Date.now() + 60 * 1000;
+    if (restarting === 0) {
+      var sec = 60;
+      if (msg.text.length > 9) {
+        sec = msg.text.substr(9);
+      }
+      restarting = Date.now() + sec * 1000;
       text += '已開啟停機模式';
     } else {
-      restring = 0;
+      restarting = 0;
       text += '已恢復正常模式';
     }
     bot1.sendMessage(msg.chat.id, text, {
@@ -149,19 +162,48 @@ bot1.on('message', (msg) => {
     text += 'http://telegra.ph/Sticker-emoji-06-03';
 
     bot1.sendMessage(msg.chat.id, text, {
-      reply_to_message_id: msg.message_id,
+      reply_to_message_id: msg.message_id
     });
     return;
   }
 
-  var found = msg.text.match(/(?:line.me\/(?:S\/sticker|stickershop\/product)\/|\/(?:line|start)[_ ]?)(\d+)/);
+  if (msg.text == '/start about') {
+    var text = '原始碼: <a href="https://git.io/line">GitHub</a>\n\n';
+    text += '別忘了參考我的另一個專案 <a href="https://t.me/Telegreat">Telegreat Desktop</a>\n';
+    text += '支援<a href="https://t.me/TelegreatFAQ/8">匯出貼圖連結</a>，效果參見<a href="https://t.me/StickerGroup/67327">這裡</a>\n\n';
+    text += '假如您的 LINE 貼圖不希望被轉換，請向<a href="https://t.me/SeanChannel">開發者</a>反應，將會協助加入黑名單\n';
+    text += '有任何建議，歡迎至<a href="https://t.me/StickerGroup">貼圖群</a>或是 <a href="https://t.me/AntiLINE">Anti-LINE 群</a>提出';
+
+    bot1.sendMessage(msg.chat.id, text, {
+      reply_to_message_id: msg.message_id,
+      parse_mode: 'HTML',
+      reply_markup: {
+        inline_keyboard: [
+          [
+            {
+              text: '更多小玩意',
+              url: 'https://t.me/SeanChannel'
+            },
+            {
+              text: '貼圖匯出工具',
+              url: 'https://t.me/Telegreat'
+            }
+          ]
+        ]
+      }
+    });
+    return;
+  }
+
+  var found = msg.text.match(/(?:line.me\/(?:S\/sticker|stickershop\/product)\/|line:.+?|Number=|\/(?:line|start)[_ ]*)(\d{3,})/);
 
   if (!found) {
     if (msg.chat.id < 0)
       return;
     var text = '歡迎使用 LINE 貼圖轉換器\n';
     text += '使用前，請先確定已啟動完成\n';
-    text += '本機器人由 <a href="https://t.me/SeanChannel">Sean</a> 提供';
+    text += '更多訊息請點<a href="https://t.me/Sean_LINE_bot?start=about">這裡</a>\n\n';
+    text += '\nℹ️ 本機器人由 <a href="https://t.me/SeanChannel">Sean</a> 提供';
 
     bot1.sendMessage(msg.chat.id, text, {
       parse_mode: 'HTML',
@@ -259,8 +301,8 @@ bot1.on('message', (msg) => {
               });
             }
           });
-          return;
         });
+        return;
       }
 
       var stat1 = fs.statSync('files/' + lid);
@@ -301,235 +343,13 @@ bot1.on('message', (msg) => {
     }
   }
 
-  var text = '準備下載 <a href="https://store.line.me/stickershop/product/' + lid + '/zh-Hant">此貼圖</a>...';
-  msg.timestamp = Date.now();
-  bot1.sendMessage(msg.chat.id, text, {
-    parse_mode: 'HTML',
-    reply_to_message_id: msg.message_id,
-    disable_web_page_preview: true
-  })
-  .then((result) => {
-    msg.msgId = result.message_id;
-
-    if (restring > 0) {
-      var text = '⚠️ 機器人要下班了\n\n';
-      text += '機器人已排程重啟，為了維護貼圖包品質，將拒收新貼圖\n';
-      text += '請過 <b>' + Math.floor((restring - Date.now()) / 1000) + '</b> 秒後再點 /line_' + lid + ' 開始下載\n\n';
-      text += '如有造成不便，我也不能怎樣 ¯\\_(ツ)_/¯';
-
-      bot1.editMessageText(id, text, {
-        chat_id: msg.chat.id,
-        messsage_id: msg.msgId,
-        parse_mode: 'HTML',
-        reply_markup: {
-          inline_keyboard: [
-            [
-              {
-                text: '先來去逛街',
-                url: 'https://t.me/StickerGroup'
-              }
-            ]
-          ]
-        }
-      });
-      return;
-    }
-
-    var zipname = 'files/' + lid + '/file.zip';
-    request('http://dl.stickershop.line.naver.jp/products/0/0/1/' + lid + '/iphone/stickers@2x.zip')
-    .on('error', function (err) {
-      msg.timestamp = Date.now() + 9487 * 1000;
-      var text = '發生錯誤，已中斷下載\n';
-      text += '詳細報告: NodeJS <b>request</b> onError\n';
-      text += '<pre>' + enHTML(JSON.stringify(err)) + '</pre>';
-      bot1.editMessageText(text, {
-        chat_id: msg.chat.id,
-        message_id: msg.msgId,
-        parse_mode: 'HTML'
-      });
-    })
-    .pipe(fs.createWriteStream(zipname))
-    .on('finish', (result) => {
-      if (msg.timestamp > Date.now())
-        return;
-
-      var zipStat = fs.statSync(zipname);
-      if (zipStat.size < 69) {
-        var zipText = fs.readFileSync(zipname);
-        msg.timestamp = Date.now() + 9487 * 1000;
-        var text = '發生錯誤，已中斷下載\n';
-        text += '詳細報告: LINE 伺服器提供檔案不正常\n';
-        text += '下載內容:\n'
-        text += '<pre>' + enHTML(zipText) + '</pre>';
-        bot1.editMessageText(text, {
-          chat_id: msg.chat.id,
-          message_id: msg.msgId,
-          parse_mode: 'HTML'
-        });
-        return;
-      }
-
-      try {
-        fs.createReadStream(zipname)
-        .pipe(unzip.Parse())
-        .on('entry', function (entry) {
-          var fileName = entry.path;
-
-          if (fileName == 'productInfo.meta') {
-            entry.pipe(fs.createWriteStream('files/' + lid + '/metadata'));
-            return;
-          }
-
-          if (/\d+@2x.png/.test(fileName)) {
-            entry.pipe(fs.createWriteStream('files/' + lid + '/origin-' + fileName.replace('@2x', '')));
-            return;
-          }
-
-          if (/(\d+_key|tab_(on|off))@2x.png/.test(fileName)) {
-            entry.autodrain();
-            return;
-          }
-
-          entry.pipe(fs.createWriteStream('files/' + lid + '/UNKNOWN-' + fileName));
-        })
-        .on('finish', () => {
-          const meta = JSON.parse(fs.readFileSync('files/' + lid + '/metadata', 'utf8'));
-          meta.error = [];
-
-          meta.name = 'line' + lid + '_by_' + config.botName2;
-
-          const langs = [
-            'zh-Hant',
-            'ja',
-            'zh-Hans',
-            'en',
-            'ko'
-          ];
-          langs.some(function (val) {
-            if (meta['title'][val] !== undefined) {
-              meta['lang'] = val;
-              return true;
-            }
-          });
-          meta.origin_title = meta.title;
-          meta.title = meta['title'][meta.lang];
-          meta.emoji = emojis[Math.floor(Math.random() * emojis.length)];
-
-          var text = '已取得 <a href="https://store.line.me/stickershop/product/' + lid + '/' + meta['lang'] + '">' + enHTML(meta.title) + '</a> 資訊...\n';
-          bot1.editMessageText(text, {
-            chat_id: msg.chat.id,
-            message_id: msg.msgId,
-            parse_mode: 'HTML'
-          });
-
-          const sid = meta.stickers[0].id;
-          const origin = 'files/' + lid + '/origin-' + sid + '.png';
-          const sticker = 'files/' + lid + '/sticker-' + sid + '.png';
-
-          sharp(origin)
-          .resize(512, 512)
-          .max()
-          .toFile(sticker)
-          .catch((error) => {
-            console.error(error);
-            msg.timestamp = Date.now() + 9487 * 1000;
-            meta.error.push(sid);
-            var text = '發生錯誤，已中斷下載\n';
-            text += '問題來源: NodeJS <b>sharp</b> (圖片轉檔工具)\n';
-            text += '詳細報告: \n';
-            text += '<pre>' + enHTML(JSON.stringify(error)) + '</pre>';
-            bot1.editMessageText(text, {
-              chat_id: msg.chat.id,
-              message_id: msg.msgId,
-              parse_mode: 'HTML'
-            });
-          })
-          .then((data) => {
-            if (msg.timestamp > Date.now())
-              return;
-            bot2.createNewStickerSet(msg.from.id, meta.name, meta.title + "  @SeanChannel", sticker, meta.emoji)
-            .catch((error) => {
-              msg.timestamp = Date.now() + 9487 * 1000;
-              meta.error.push(sid);
-
-              if (error.message.includes('sticker set name is already occupied')) {
-                var text = '前次下載失敗，請先試試看<a href="https://t.me/addstickers/' + meta.name + '">這包貼圖</a>';
-                text += '如有問題，就點按鈕修復吧 :D\n';
-                bot1.editMessageText(text, {
-                  chat_id: msg.chat.id,
-                  message_id: msg.msgId,
-                  parse_mode: 'HTML',
-                  reply_markup: {
-                    inline_keyboard: [
-                      [
-                        {
-                          text: '給他好看 👻',
-                          callback_data: 'remove_' + lid
-                        }
-                      ]
-                    ]
-                  }
-                });
-                return;
-              }
-
-              var text = '發生錯誤，已中斷下載\n';
-              if (error.message.includes('user not found')) {
-                text += '請確定 <a href="https://t.me/' + config.botName2 + '">已於此啟動過機器人</a>\n';
-              }
-              text += '詳細報告: createNewStickerSet\n';
-              text += '<pre>' + enHTML(JSON.stringify(error)) + '</pre>';
-              bot1.editMessageText(text, {
-                chat_id: msg.chat.id,
-                message_id: msg.msgId,
-                disable_web_page_preview: true,
-                parse_mode: 'HTML'
-              });
-            })
-            .then((result) => {
-              if (msg.timestamp > Date.now())
-                return;
-              if (meta.error.indexOf(sid) < 0) {
-                meta.done = [ sid ];
-                fs.writeFileSync('files/' + lid + '/metadata', JSON.stringify(meta));
-                var text = '上傳 <a href="https://store.line.me/stickershop/product/' + lid + '/' + meta['lang'] + '">' + enHTML(meta.title) + '</a> 中...\n';
-                text += prog(meta.done.length, meta.stickers.length);
-                bot1.editMessageText(text, {
-                  chat_id: msg.chat.id,
-                  message_id: msg.msgId,
-                  parse_mode: 'HTML'
-                });
-                uploadBody(msg, lid);
-              }
-              fs.appendFile('files/' + lid + '/request', JSON.stringify(msg), (error) => { console.error(error) });
-            });
-          });
-        });
-      } catch (err) {
-        console.error(err);
-        var text = '發生錯誤，已中斷下載\n';
-        text += '詳細報告: UNKNOWN (catch)\n';
-        text += '<pre>' + enHTML(error) + '</pre>';
-        bot1.editMessageText(text, {
-          chat_id: msg.chat.id,
-          message_id: msg.msgId,
-          parse_mode: 'HTML'
-        });
-        return;
-      }
-    });
-  });
-});
-
-function uploadBody(msg, lid) {
-  if (restring > 0) {
+  if (restarting > 0) {
     var text = '⚠️ 機器人要下班了\n\n';
-    text += '機器人已排程重啟，為了維護貼圖包品質，將不再新增貼圖\n';
-    text += '請過 <b>' + Math.floor((restring - Date.now()) / 1000) + '</b> 秒後再點 /line_' + lid + ' 開始下載\n\n';
+    text += '機器人已排程重啟，為了維護貼圖包品質，將拒收新貼圖\n';
+    text += '請過 <b>' + Math.floor((restarting - Date.now()) / 1000) + '</b> 秒後再點 /line_' + lid + ' 開始下載\n\n';
     text += '如有造成不便，我也不能怎樣 ¯\\_(ツ)_/¯';
 
-    bot1.editMessageText(id, text, {
-      chat_id: msg.chat.id,
+    bot1.sendMessage(msg.chat.id, text, {
       messsage_id: msg.msgId,
       parse_mode: 'HTML',
       reply_markup: {
@@ -543,7 +363,180 @@ function uploadBody(msg, lid) {
         ]
       }
     });
-    return;
+    if (config.admins.indexOf(msg.from.id) < 0) {
+      return;
+    }
+  }
+
+  var text = '準備下載 <a href="https://store.line.me/stickershop/product/' + lid + '/zh-Hant">此貼圖</a>...';
+  msg.timestamp = Date.now();
+  bot1.sendMessage(msg.chat.id, text, {
+    parse_mode: 'HTML',
+    reply_to_message_id: msg.message_id,
+    disable_web_page_preview: true
+  })
+  .then((result) => {
+    msg.msgId = result.message_id;
+
+    downloadZip(lid)
+    .catch((error) => {
+      msg.timestamp = Date.now() + 9487 * 1000;
+      bot1.editMessageText(error, {
+        chat_id: msg.chat.id,
+        message_id: msg.msgId,
+        parse_mode: 'HTML'
+      });
+    })
+    .then((dir) => {
+      if (!fs.existsSync(dir + '/metadata')) {
+        msg.timestamp = Date.now() + 404 * 1000;
+        var text = '發生錯誤，已中斷下載\n';
+        text += '問題來源: 找不到 <b>metadata</b> (中繼資料) 檔案\n';
+        text += '編號: <code>' + lid + '</code> \n';
+        bot1.editMessageText(text, {
+          chat_id: msg.chat.id,
+          message_id: msg.msgId,
+          parse_mode: 'HTML'
+        });
+        return;
+      }
+      const meta = JSON.parse(fs.readFileSync(dir + '/metadata', 'utf8'));
+      meta.error = [];
+
+      meta.name = 'line' + lid + '_by_' + config.botName2;
+
+      langs.some(function (val) {
+        if (meta['title'][val] !== undefined) {
+          meta['lang'] = val;
+          return true;
+        }
+      });
+      meta.origin_title = meta.title;
+      meta.title = meta['title'][meta.lang];
+      meta.emoji = emojis[Math.floor(Math.random() * emojis.length)];
+
+      var text = '已取得 <a href="https://store.line.me/stickershop/product/' + lid + '/' + meta['lang'] + '">' + enHTML(meta.title) + '</a> 資訊...\n';
+      bot1.editMessageText(text, {
+        chat_id: msg.chat.id,
+        message_id: msg.msgId,
+        parse_mode: 'HTML'
+      });
+
+      const sid = meta.stickers[0].id;
+      const origin = dir + '/origin-' + sid + '.png';
+      const sticker = dir + '/sticker-' + sid + '.png';
+
+      console.log('sharp ' + lid);
+      sharp(origin)
+      .resize(512, 512)
+      .max()
+      .toFile(sticker)
+      .catch((error) => {
+        console.error(error);
+        msg.timestamp = Date.now() + 9487 * 1000;
+        meta.error.push(sid);
+        var text = '發生錯誤，已中斷下載\n';
+        text += '問題來源: NodeJS <b>sharp</b> (圖片轉檔工具)\n';
+        text += '編號: <code>' + lid + '</code> \n';
+        text += '詳細報告: createNewStickerSet\n';
+        text += '<pre>' + enHTML(JSON.stringify(error)) + '</pre>';
+        bot1.editMessageText(text, {
+          chat_id: msg.chat.id,
+          message_id: msg.msgId,
+          parse_mode: 'HTML'
+        });
+      })
+      .then((data) => {
+        if (msg.timestamp > Date.now())
+          return;
+        bot2.createNewStickerSet(msg.from.id, meta.name, meta.title + "  @SeanChannel", sticker, meta.emoji)
+        .catch((error) => {
+          msg.timestamp = Date.now() + 9487 * 1000;
+          meta.error.push(sid);
+
+          if (error.message.includes('sticker set name is already occupied')) {
+            var text = '前次下載失敗，請先試試看<a href="https://t.me/addstickers/' + meta.name + '">這包貼圖</a>';
+            text += '如有問題，就點按鈕修復吧 :D\n';
+            bot1.editMessageText(text, {
+              chat_id: msg.chat.id,
+              message_id: msg.msgId,
+              parse_mode: 'HTML',
+              reply_markup: {
+                inline_keyboard: [
+                  [
+                    {
+                      text: '給他好看 👻',
+                      callback_data: 'remove_' + lid
+                    }
+                  ]
+                ]
+              }
+            });
+            return;
+          }
+
+          var text = '發生錯誤，已中斷下載\n';
+          if (error.message.includes('user not found')) {
+            text += '請確定 <a href="https://t.me/' + config.botName2 + '">已於此啟動過機器人</a>\n';
+          } else {
+            text += '編號: <code>' + lid + '</code> \n';
+          }
+          text += '詳細報告: createNewStickerSet\n';
+          text += '<pre>' + enHTML(JSON.stringify(error)) + '</pre>';
+          bot1.editMessageText(text, {
+            chat_id: msg.chat.id,
+            message_id: msg.msgId,
+            disable_web_page_preview: true,
+            parse_mode: 'HTML'
+          });
+        })
+        .then((result) => {
+          if (msg.timestamp > Date.now())
+            return;
+          if (meta.error.indexOf(sid) < 0) {
+            meta.done = [ sid ];
+            fs.writeFileSync(dir + '/metadata', JSON.stringify(meta));
+            var text = '上傳 <a href="https://store.line.me/stickershop/product/' + lid + '/' + meta['lang'] + '">' + enHTML(meta.title) + '</a> 中...\n';
+            text += prog(meta.done.length, meta.stickers.length);
+            bot1.editMessageText(text, {
+              chat_id: msg.chat.id,
+              message_id: msg.msgId,
+              parse_mode: 'HTML'
+            });
+            uploadBody(msg, lid);
+          }
+          fs.appendFile(dir + '/request', JSON.stringify(msg), (error) => { console.error(error) });
+        });
+      });
+    });
+  });
+});
+
+function uploadBody(msg, lid) {
+  if (restarting > 0) {
+    var text = '⚠️ 機器人要下班了\n\n';
+    text += '機器人已排程重啟，為了維護貼圖包品質，將不再新增貼圖\n';
+    text += '請過 <b>' + Math.floor((restarting - Date.now()) / 1000) + '</b> 秒後再點 /line_' + lid + ' 開始下載\n\n';
+    text += '如有造成不便，我也不能怎樣 ¯\\_(ツ)_/¯';
+
+    bot1.editMessageText(text, {
+      chat_id: msg.chat.id,
+      message_id: msg.msgId,
+      parse_mode: 'HTML',
+      reply_markup: {
+        inline_keyboard: [
+          [
+            {
+              text: '先來去逛街',
+              url: 'https://t.me/StickerGroup'
+            }
+          ]
+        ]
+      }
+    });
+    if (config.admins.indexOf(msg.from.id) < 0) {
+      return;
+    }
   }
 
   const meta = JSON.parse(fs.readFileSync('files/' + lid + '/metadata', 'utf8'));
@@ -570,7 +563,8 @@ function uploadBody(msg, lid) {
       meta.error.push(sid);
       var text = '發生錯誤，已中斷下載\n';
       text += '問題來源: NodeJS <b>sharp</b> (圖片轉檔工具)\n';
-      text += '詳細報告: \n';
+      text += '編號: <code>' + lid + '</code> \n';
+      text += '詳細報告: addStickerToSet\n';
       text += '<pre>' + enHTML(JSON.stringify(error)) + '</pre>';
       bot1.editMessageText(text, {
         chat_id: msg.chat.id,
@@ -585,19 +579,22 @@ function uploadBody(msg, lid) {
         if (Date.now() < msg.timestamp)
           return;
         msg.timestamp = Date.now() + 9487 * 1000;
-        var text = '發生錯誤，請五分鐘後再試\n';
+        var text;
         if (error.message.includes('user not found')) {
-          text += '請確定 <a href="https://t.me/' + config.botName2 + '">已於此啟動過機器人</a>\n';
+          text = '請確定 <a href="https://t.me/' + config.botName2 + '">已於此啟動過機器人</a>\n';
           text += '點擊 /line_' + lid + ' 重試\n';
         } else if (error.message.includes('retry after')) {
-          text += '上傳速度太快啦，TG 伺服器要冷卻一下\n';
+          text = '上傳速度太快啦，TG 伺服器要冷卻一下\n';
           text += '點擊 /line_' + lid + ' 重試\n';
+          text += prog(meta.done.length, meta.stickers.length);
+          text += '貼圖包連結: <a href="https://t.me/addstickers/' + meta.name + '">' + enHTML(meta.title) + '</a>\n';
         } else if (error.message.includes('STICKERS_TOO_MUCH')) {
-          text += '貼圖數量衝破天際啦~\n';
+          text = '貼圖數量衝破天際啦~\n';
+          text += '貼圖包連結: <a href="https://t.me/addstickers/' + meta.name + '">' + enHTML(meta.title) + '</a>\n';
+        } else {
+          text += '編號: <code>' + lid + '</code> \n';
         }
-        text += prog(meta.done.length, meta.stickers.length);
-        text += '貼圖包連結: <a href="https://t.me/addstickers/' + meta.name + '">' + enHTML(meta.title) + '</a>\n';
-        text += '詳細報告: addStickerToSet\n';
+        text += '\n詳細報告: addStickerToSet\n';
         text += '<pre>' + enHTML(JSON.stringify(error)) + '</pre>';
         bot1.editMessageText(text, {
           chat_id: msg.chat.id,
@@ -634,7 +631,7 @@ function uploadBody(msg, lid) {
                   },
                   {
                     text: '編輯表符',
-                    callback_data: 'done_edit_emoji_' + meta.name
+                    callback_data: 'edit_emoji_' + meta.name
                   }
                 ],
                 [
@@ -649,10 +646,10 @@ function uploadBody(msg, lid) {
             }
           });
 
-          bot2.getStickerSet(msg.sticker.set_name)
+          bot2.getStickerSet(meta.name)
           .then((set) => {
             if (set.stickers.length !== meta.stickers.length) {
-              var text = '<a href="https://t.me/addstickers/' + msg.sticker.set_name + '">' + enHTML(meta.title) + '</a>怪怪的\n';
+              var text = '<a href="https://t.me/addstickers/' + meta.name + '">' + enHTML(meta.title) + '</a>怪怪的\n';
               text += '要重新下載嗎？';
               bot1.sendMessage(msg.chat.id, text, {
                 reply_to_message_id: msg.message_id,
@@ -670,7 +667,7 @@ function uploadBody(msg, lid) {
               });
             }
           });
-        } else if (Date.now() - msg.timestamp > 3 * 1000) {
+        } else if (Date.now() - msg.timestamp > 500) {
           msg.timestamp = Date.now();
           var text = '上傳 <a href="https://store.line.me/stickershop/product/' + lid + '/' + meta['lang'] + '">' + enHTML(meta.title) + '</a> 中...\n';
           text += prog(meta.done.length, meta.stickers.length);
@@ -702,112 +699,179 @@ bot1.on('callback_query', (query) => {
   if (query.data.startsWith('remove_')) {
     lid = query.data.substr(7);
 
-    const meta = JSON.parse(fs.readFileSync('files/' + lid + '/metadata', 'utf8'));
-    meta.name = 'line' + lid + '_by_' + config.botName2;
-    fs.writeFile('files/' + lid + '/metadata', JSON.stringify(meta), (error) => { if (error) console.error(error) });  // Prevent collision
+    downloadZip(lid)
+    .catch((error) => {
+      msg.timestamp = Date.now() + 9487 * 1000;
+      bot1.editMessageText(error, {
+        chat_id: msg.chat.id,
+        message_id: msg.msgId,
+        parse_mode: 'HTML'
+      });
+    })
+    .then((dir) => {
+      const meta = JSON.parse(fs.readFileSync('files/' + lid + '/metadata', 'utf8'));
+      meta.name = 'line' + lid + '_by_' + config.botName2;
+      fs.writeFile('files/' + lid + '/metadata', JSON.stringify(meta), (error) => { if (error) console.error(error) });  // Prevent collision
 
-    bot2.getStickerSet('line' + lid + '_by_' + config.botName2)
-    .then((set) => {
-      if (meta.done !== undefined) {
-        var text = '';
+      bot2.getStickerSet('line' + lid + '_by_' + config.botName2)
+      .then((set) => {
+        if (meta.done !== undefined) {
+          var text = '';
 
-        var stat1 = fs.statSync('files/' + lid);
-        var stat2 = fs.statSync('files/' + lid + '/metadata');
-        if (Date.now() - stat1.mtimeMs < 1 * 60 * 1000
-         || Date.now() - stat2.mtimeMs < 1 * 60 * 1000) {
-          text = '冷卻中，請三分鐘後再點一次';
+          var stat1 = fs.statSync('files/' + lid);
+          var stat2 = fs.statSync('files/' + lid + '/metadata');
+          if (Date.now() - stat1.mtimeMs < 1 * 60 * 1000
+           || Date.now() - stat2.mtimeMs < 1 * 60 * 1000) {
+            text = '冷卻中，請三分鐘後再點一次';
+          }
+
+          if (meta.stickers.length !== meta.done.length
+                  || meta.stickers.length === set.stickers.length) {
+            text = '看起來沒問題呀\n如真的怪怪的，請至群組提出'
+          }
+
+          if (config.admins.indexOf(query.from.id) > -1) {
+            text = '';
+          }
+
+          if (text !== '') {
+            bot1.answerCallbackQuery(query.id, {
+              text: text,
+              show_alert: 'true'
+            });
+            return;
+          }
         }
 
-        if (meta.stickers.length !== meta.done.length
-                || meta.stickers.length === set.stickers.length) {
-          text = '看起來沒問題呀\n如真的怪怪的，請至群組提出'
-        }
+        console.warn(query);
 
-        if (config.admins.indexOf(query.from.id) > -1) {
-          text = '';
-        }
-
-        if (text !== '') {
-          bot1.answerCallbackQuery(query.id, {
-            text: text,
-            show_alert: 'true'
+        if (meta.origin_title === undefined) {
+          langs.some(function (val) {
+            if (meta['title'][val] !== undefined) {
+              meta['lang'] = val;
+              return true;
+            }
           });
-          return;
+          meta.origin_title = meta.title;
+          meta.title = set.title.replace(/ +@SeanChannel/, '');
         }
-      }
+        if (meta.emoji === undefined) {
+          meta.emoji = emojis[Math.floor(Math.random() * emojis.length)];
+        }
+        meta.done = [];
 
-      console.warn(query);
+        for (var i=0; i<set.stickers.length; i++) {
+          bot2.deleteStickerFromSet(set.stickers[i].file_id);
+        }
 
-      if (meta.origin_title === undefined) {
-        const langs = [
-          'zh-Hant',
-          'ja',
-          'zh-Hans',
-          'en',
-          'ko'
-        ];
-        langs.some(function (val) {
-          if (meta['title'][val] !== undefined) {
-            meta['lang'] = val;
-            return true;
-          }
-        });
-        meta.origin_title = meta.title;
-        meta.title = set.title.replace(/ +@SeanChannel/, '');
-      }
-      if (meta.emoji === undefined) {
-        meta.emoji = emojis[Math.floor(Math.random() * emojis.length)];
-      }
-      meta.done = [];
-
-      for (var i=0; i<set.stickers.length; i++) {
-        bot2.deleteStickerFromSet(set.stickers[i].file_id);
-      }
-
-      if (!query.message.text.includes('已清空')) {
-        var text = '已清空 <a href="https://t.me/addstickers/' + meta.name + '">' + meta.title + '</a>\n';
-        text += '確認顯示「找不到貼圖包」後，請等待三分鐘，並點擊 /line_' + lid + ' 重新下載指令';
-        bot1.editMessageText(text, {
-          chat_id: query.message.chat.id,
-          message_id: query.message.message_id,
-          parse_mode: 'HTML',
-          reply_markup: {
-            inline_keyboard: [
-              [
-                {
-                  text: '他不是空的 😰',
-                  callback_data: 'remove_' + lid
-                }
+        if (!query.message.text.includes('已清空')) {
+          var text = '已清空 <a href="https://t.me/addstickers/' + meta.name + '">' + meta.title + '</a>\n';
+          text += '確認顯示「找不到貼圖包」後，請等待三分鐘，並點擊 /line_' + lid + ' 重新下載指令';
+          bot1.editMessageText(text, {
+            chat_id: query.message.chat.id,
+            message_id: query.message.message_id,
+            parse_mode: 'HTML',
+            reply_markup: {
+              inline_keyboard: [
+                [
+                  {
+                    text: '他不是空的 😰',
+                    callback_data: 'remove_' + lid
+                  }
+                ]
               ]
-            ]
-          }
+            }
+          });
+        }
+
+        fs.writeFile('files/' + lid + '/metadata', JSON.stringify(meta), (error) => { if (error) console.error(error) });
+
+        bot1.answerCallbackQuery(query.id, {
+          text: '處理完成 👌',
+          show_alert: 'true'
         });
-      }
-
-      fs.writeFile('files/' + lid + '/metadata', JSON.stringify(meta), (error) => { if (error) console.error(error) });
-
-      bot1.answerCallbackQuery(query.id, {
-        text: '處理完成 👌',
-        show_alert: 'true'
       });
     });
   }
 
-  if (query.data.startsWith('done_edit_emoji_')) {
-    var text = '這邊有教學喔 :D\n';
-    text += 'http://telegra.ph/Sticker-emoji-06-03';
+  if (query.data.startsWith('edit_emoji_')) {
+    var text = '點這邊看<a href="http://telegra.ph/Sticker-emoji-06-03">表符修改教學</a>\n\n';
+    text += '您的貼圖編號: <code>' + query.data.substr(11) + '</code>\n\n';
+    text += '左轉找 @Stickers 機器人';
 
-    bot1.sendMessage(msg.chat.id, text, {
-      reply_to_message_id: query.message.message_id
+    bot1.sendMessage(query.message.chat.id, text, {
+      reply_to_message_id: query.message.message_id,
+      parse_mode: 'HTML'
     });
 
     bot1.answerCallbackQuery(query.id, {
-      text: '您的貼圖編號: ' + query.data.substr(16),
-      show_alert: 'true'
+      text: '您的貼圖編號: ' + query.data.substr(11)
     });
   }
 });
 
+async function downloadZip(lid) {
+  return new Promise(function(resolve, reject) {
+    const dir = 'files/' + lid;
+    const zipname = dir + '/file.zip';
+
+    request('http://dl.stickershop.line.naver.jp/products/0/0/1/' + lid + '/iphone/stickers@2x.zip')
+    .on('error', function (err) {
+      var text = '發生錯誤，已中斷下載\n';
+      text += '編號: <code>' + lid + '</code> \n';
+      text += '詳細報告: NodeJS <b>request</b> onError\n';
+      text += '<pre>' + enHTML(JSON.stringify(err)) + '</pre>';
+      reject(text);
+    })
+    .pipe(fs.createWriteStream(zipname))
+    .on('finish', (result) => {
+      const zipStat = fs.statSync(zipname);
+      if (zipStat.size < 69) {
+        const zipText = fs.readFileSync(zipname);
+        var text = '發生錯誤，已中斷下載\n';
+        text += '詳細報告: LINE 伺服器提供檔案不正常\n';
+        text += '下載內容:\n'
+        text += '<pre>' + enHTML(zipText) + '</pre>';
+        reject(text);
+      }
+
+      fs.createReadStream(zipname)
+      .pipe(unzip.Parse())
+      .on('entry', function (entry) {
+        console.log('entry' + lid);
+        var fileName = entry.path;
+
+        if (fileName == 'productInfo.meta') {
+          entry.pipe(fs.createWriteStream(dir + '/metadata'));
+          return;
+        }
+
+        if (/\d+@2x.png/.test(fileName)) {
+          entry.pipe(fs.createWriteStream(dir + '/origin-' + fileName.replace('@2x', '')));
+          return;
+        }
+
+        if (/(\d+_key|tab_(on|off))@2x.png/.test(fileName)) {
+          entry.autodrain();
+          return;
+        }
+
+        entry.pipe(fs.createWriteStream(dir + '/UNKNOWN-' + fileName));
+      })
+      .on('finish', () => {
+        console.log('resolve' + lid);
+        resolve(dir);
+      })
+      .on("error", (err) => {
+        var text = '發生錯誤，已中斷下載\n';
+        text += '編號: <code>' + lid + '</code> \n';
+        text += '詳細報告: fs <b>createReadStream</b> onError\n';
+        text += '<pre>' + enHTML(JSON.stringify(err)) + '</pre>';
+        reject(text);
+      });
+    });
+  });
+}
 
 function enHTML(str) {
   var s = str + '';
@@ -822,7 +886,7 @@ function prog(current, total) {
     current = total;
   }
   const count = 20;
-  var str = '下載進度: <b>' + current + '</b>/' + total + '  <code>[';
+  var str = '進度: <b>' + current + '</b>/' + total + '  <code>[';
   str += '█'.repeat(Math.round(current * count / total))
   str += '-'.repeat(count - Math.round(current * count / total))
   str += ']</code>\n'
