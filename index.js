@@ -83,27 +83,7 @@ bot1.on('message', (msg) => {
       var found = msg.sticker.set_name.match(/^line(\d+)_by_Sean_Bot$/);
       if (found) {
         const lid = found[1];
-        const meta = JSON.parse(fs.readFileSync('files/' + lid + '/metadata', 'utf8'));
-        bot2.getStickerSet(msg.sticker.set_name)
-        .then((set) => {
-          if (set.stickers.length !== meta.stickers.length) {
-            var text = '<a href="https://t.me/addstickers/' + msg.sticker.set_name + '">這包貼圖</a>怪怪的，要砍掉重練嗎？\n';
-            bot1.sendMessage(msg.chat.id, text, {
-              reply_to_message_id: msg.message_id,
-              parse_mode: 'HTML',
-              reply_markup: {
-                inline_keyboard: [
-                  [
-                    {
-                      text: '當然 砍了他 😈',
-                      callback_data: 'remove_' + lid
-                    }
-                  ]
-                ]
-              }
-            });
-          }
-        });
+        checkPack(msg, lid);
       }
     }
     return;
@@ -278,29 +258,7 @@ bot1.on('message', (msg) => {
         })
         .then((result) => {
           msg.msgId = result.message_id;
-
-          bot2.getStickerSet('line' + lid + '_by_' + config.botName2)
-          .then((set) => {
-            if (set.stickers.length !== meta.stickers.length) {
-              var text = '前次下載失敗，請先試試看<a href="https://t.me/addstickers/' + meta.name + '">這包貼圖</a>\n';
-              text += '如有問題，就砍掉重練吧 :D\n';
-              bot1.editMessageText(text, {
-                chat_id: msg.chat.id,
-                message_id: msg.msgId,
-                parse_mode: 'HTML',
-                reply_markup: {
-                  inline_keyboard: [
-                    [
-                      {
-                        text: '砍掉重練 😈',
-                        callback_data: 'remove_' + lid
-                      }
-                    ]
-                  ]
-                }
-              });
-            }
-          });
+          checkPack(msg, lid);
         });
         return;
       }
@@ -454,24 +412,7 @@ bot1.on('message', (msg) => {
           meta.error.push(sid);
 
           if (error.message.includes('sticker set name is already occupied')) {
-            var text = '前次下載失敗，請先試試看<a href="https://t.me/addstickers/' + meta.name + '">這包貼圖</a>';
-            text += '如有問題，就點按鈕修復吧 :D\n';
-            bot1.editMessageText(text, {
-              chat_id: msg.chat.id,
-              message_id: msg.msgId,
-              parse_mode: 'HTML',
-              reply_markup: {
-                inline_keyboard: [
-                  [
-                    {
-                      text: '給他好看 👻',
-                      callback_data: 'remove_' + lid
-                    }
-                  ]
-                ]
-              }
-            });
-            return;
+            checkPack(msg, lid);
           }
 
           var text = '發生錯誤，已中斷下載\n';
@@ -645,27 +586,7 @@ function uploadBody(msg, lid) {
             }
           });
 
-          bot2.getStickerSet(meta.name)
-          .then((set) => {
-            if (set.stickers.length !== meta.stickers.length) {
-              var text = '<a href="https://t.me/addstickers/' + meta.name + '">' + enHTML(meta.title) + '</a>怪怪的\n';
-              text += '要重新下載嗎？';
-              bot1.sendMessage(msg.chat.id, text, {
-                reply_to_message_id: msg.message_id,
-                parse_mode: 'HTML',
-                reply_markup: {
-                  inline_keyboard: [
-                    [
-                      {
-                        text: '重來一次 😅',
-                        callback_data: 'remove_' + lid
-                      }
-                    ]
-                  ]
-                }
-              });
-            }
-          });
+            checkPack(msg, lid);
         } else if (Date.now() - msg.timestamp > 500) {
           msg.timestamp = Date.now();
           var text = '上傳 <a href="https://store.line.me/stickershop/product/' + lid + '/' + meta['lang'] + '">' + enHTML(meta.title) + '</a> 中...\n';
@@ -867,6 +788,46 @@ async function downloadZip(lid) {
         reject(text);
       });
     });
+  });
+}
+
+function checkPack(msg, lid) {
+  const meta = JSON.parse(fs.readFileSync('files/' + lid + '/metadata', 'utf8'));
+
+  bot2.getStickerSet('line' + lid + '_by_' + config.botName2)
+  .catch((err) => {
+    msg.timestamp = Date.now() + 9487 * 1000;
+    fs.unlinkSync('files/' + lid + '/metadata');
+    var text = '貼圖包已失效\n';
+    text += '已更新暫存檔，點擊 /line_' + lid + ' 指令重新下載';
+    bot1.editMessageText(text, {
+      chat_id: msg.chat.id,
+      message_id: msg.msgId,
+      parse_mode: 'HTML',
+    });
+  })
+  .then((set) => {
+    if (Date.now() < msg.timestamp)
+      return;
+    if (set.stickers.length !== meta.stickers.length) {
+      var text = '前次下載失敗，請先試試看<a href="https://t.me/addstickers/' + meta.name + '">這包貼圖</a>\n';
+      text += '如有問題，就砍掉重練吧 :D\n';
+      bot1.editMessageText(text, {
+        chat_id: msg.chat.id,
+        message_id: msg.msgId,
+        parse_mode: 'HTML',
+        reply_markup: {
+          inline_keyboard: [
+            [
+              {
+                text: '砍掉重練 😈',
+                callback_data: 'remove_' + lid
+              }
+            ]
+          ]
+        }
+      });
+    }
   });
 }
 
