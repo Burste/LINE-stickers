@@ -346,7 +346,7 @@ bot1.on('message', (msg) => {
   if (restarting > 0) {
     var text = '⚠️ 機器人要下班了\n\n';
     text += '機器人已排程重啟，為了維護貼圖包品質，將拒收新貼圖\n';
-    text += '請過 <b>' + Math.floor((restarting - Date.now()) / 1000) + '</b> 秒後再點 /line_' + lid + ' 開始下載\n\n';
+    text += '請過 <b>' + Math.floor((restarting - Date.now()) / 1000 + 5) + '</b> 秒後再點 /line_' + lid + ' 開始下載\n\n';
     text += '如有造成不便，我也不能怎樣 ¯\\_(ツ)_/¯';
 
     bot1.sendMessage(msg.chat.id, text, {
@@ -426,7 +426,6 @@ bot1.on('message', (msg) => {
       const origin = dir + '/origin-' + sid + '.png';
       const sticker = dir + '/sticker-' + sid + '.png';
 
-      console.log('sharp ' + lid);
       sharp(origin)
       .resize(512, 512)
       .max()
@@ -516,7 +515,7 @@ function uploadBody(msg, lid) {
   if (restarting > 0) {
     var text = '⚠️ 機器人要下班了\n\n';
     text += '機器人已排程重啟，為了維護貼圖包品質，將不再新增貼圖\n';
-    text += '請過 <b>' + Math.floor((restarting - Date.now()) / 1000) + '</b> 秒後再點 /line_' + lid + ' 開始下載\n\n';
+    text += '請過 <b>' + Math.floor((restarting - Date.now()) / 1000 + 5) + '</b> 秒後再點 /line_' + lid + ' 開始下載\n\n';
     text += '如有造成不便，我也不能怎樣 ¯\\_(ツ)_/¯';
 
     bot1.editMessageText(text, {
@@ -838,7 +837,6 @@ async function downloadZip(lid) {
       fs.createReadStream(zipname)
       .pipe(unzip.Parse())
       .on('entry', function (entry) {
-        console.log('entry' + lid);
         var fileName = entry.path;
 
         if (fileName == 'productInfo.meta') {
@@ -858,8 +856,7 @@ async function downloadZip(lid) {
 
         entry.pipe(fs.createWriteStream(dir + '/UNKNOWN-' + fileName));
       })
-      .on('finish', () => {
-        console.log('resolve' + lid);
+      .on('close', () => {
         resolve(dir);
       })
       .on("error", (err) => {
