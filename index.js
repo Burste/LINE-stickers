@@ -258,6 +258,7 @@ bot1.on('message', (msg) => {
         })
         .then((result) => {
           msg.msgId = result.message_id;
+          msg.timestamp = Date.now();
           checkPack(msg, lid);
         });
         return;
@@ -295,6 +296,7 @@ bot1.on('message', (msg) => {
       })
       .then((result) => {
         msg.msgId = result.message_id;
+        msg.timestamp = Date.now();
         uploadBody(msg, lid);
       });
       return;
@@ -335,6 +337,7 @@ bot1.on('message', (msg) => {
   })
   .then((result) => {
     msg.msgId = result.message_id;
+    msg.timestamp = Date.now();
 
     downloadZip(lid)
     .catch((error) => {
@@ -445,7 +448,7 @@ bot1.on('message', (msg) => {
 });
 
 function uploadBody(msg, lid) {
-  if (restarting > 0) {
+  if (restarting > 0 && config.admins.indexOf(msg.from.id) < 0) {
     var text = '⚠️ 機器人要下班了\n\n';
     text += '機器人已排程重啟，為了維護貼圖包品質，將不再新增貼圖\n';
     text += '請過 <b>' + Math.floor((restarting - Date.now()) / 1000 + 5) + '</b> 秒後再點 /line_' + lid + ' 開始下載\n\n';
@@ -466,9 +469,7 @@ function uploadBody(msg, lid) {
         ]
       }
     });
-    if (config.admins.indexOf(msg.from.id) < 0) {
-      return;
-    }
+    return;
   }
 
   const meta = JSON.parse(fs.readFileSync('files/' + lid + '/metadata', 'utf8'));
@@ -775,33 +776,54 @@ async function downloadZip(lid) {
 
 async function resizePng(dir, sid, q = 100) {
   return new Promise(function(resolve, reject) {
+    if (q < 1) {
+      var text = '發生錯誤，已中斷下載\n';
+      text += '問題來源: resize webp\n';
+      text += '編號: <code>' + sid + '</code> \n';
+      text += '詳細報告: 檔案過大\n';
+      reject(text);
+    }
+
     const origin = dir + '/origin-' + sid + '.png';
-    const sticker = dir + '/sticker-' + sid + '.png';
-    const webp = dir + '/sticker-' + sid + '.webp';
+    const sticker = dir + '/sticker-' + sid + (q == 100 ? '' : '-' + q) + '.png';
+
+    var format = 'webp';
+    var tmpFile = dir + '/sticker-' + sid + '-' + q + '.webp';
+    var size = 512;
+    if (q < 64) {
+      console.log(dir, sid, q);
+      format = 'jpg';
+      tmpFile = dir + '/sticker-' + sid + '-' + q + '.jpg';
+      size = 8 * q;
+    }
 
     sharp(origin)
-    .resize(512, 512)
+    .toFormat(format, {
+      quality: q
+    })
+    .resize(size, size)
     .max()
-    .webp({quality: q})
-    .toFile(webp)
+    .toFile(tmpFile)
     .catch((error) => {
       var text = '發生錯誤，已中斷下載\n';
       text += '問題來源: NodeJS <b>sharp</b> (圖片轉檔工具)\n';
-      text += '編號: <code>' + lid + '</code> \n';
+      text += '編號: <code>' + sid + '</code> \n';
       text += '詳細報告: resize webp\n';
-      text += '<pre>' + enHTML(JSON.stringify(error)) + '</pre>';
+      text += '<pre>' + enHTML(error.message) + '</pre>';
       reject(text);
     })
     .then((result) => {
-      sharp(webp)
+      sharp(tmpFile)
+      .resize(512, 512)
+      .max()
       .png()
       .toFile(sticker)
       .catch((error) => {
         var text = '發生錯誤，已中斷下載\n';
         text += '問題來源: NodeJS <b>sharp</b> (圖片轉檔工具)\n';
-        text += '編號: <code>' + lid + '</code> \n';
+        text += '編號: <code>' + sid + '</code> \n';
         text += '詳細報告: convert png\n';
-        text += '<pre>' + enHTML(JSON.stringify(error)) + '</pre>';
+        text += '<pre>' + enHTML(error.message) + '</pre>';
         reject(text);
       })
       .then((result) => {
@@ -810,9 +832,13 @@ async function resizePng(dir, sid, q = 100) {
           resolve(sticker);
           return;
         }
-        resizePng(dir, sid, q-20)
-        .catch(reject)
-        .then(resolve);
+        resizePng(dir, sid, Math.floor(q*0.8))
+        .catch((err) => {
+          reject(err + '.');
+        })
+        .then((sticker) => {
+          resolve(sticker);
+        });
       });
     })
   });
