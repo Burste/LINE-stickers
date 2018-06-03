@@ -381,31 +381,23 @@ bot1.on('message', (msg) => {
       });
 
       const sid = meta.stickers[0].id;
-      const origin = dir + '/origin-' + sid + '.png';
-      const sticker = dir + '/sticker-' + sid + '.png';
-
-      sharp(origin)
-      .resize(512, 512)
-      .max()
-      .toFile(sticker)
+      resizePng(dir, sid)
       .catch((error) => {
-        console.error(error);
         msg.timestamp = Date.now() + 9487 * 1000;
-        meta.error.push(sid);
-        var text = '發生錯誤，已中斷下載\n';
-        text += '問題來源: NodeJS <b>sharp</b> (圖片轉檔工具)\n';
-        text += '編號: <code>' + lid + '</code> \n';
-        text += '詳細報告: createNewStickerSet\n';
-        text += '<pre>' + enHTML(JSON.stringify(error)) + '</pre>';
-        bot1.editMessageText(text, {
+        bot1.editMessageText(error, {
           chat_id: msg.chat.id,
           message_id: msg.msgId,
           parse_mode: 'HTML'
         });
       })
-      .then((data) => {
+      .then((sticker) => {
         if (msg.timestamp > Date.now())
           return;
+
+        const stat = fs.statSync(sticker);
+        if (stat.size > 512 * 1000) {
+        }
+
         bot2.createNewStickerSet(msg.from.id, meta.name, meta.title + "  @SeanChannel", sticker, meta.emoji)
         .catch((error) => {
           msg.timestamp = Date.now() + 9487 * 1000;
@@ -490,29 +482,18 @@ function uploadBody(msg, lid) {
     if (meta.done.indexOf(sid) > -1)
       continue;
 
-    const origin = 'files/' + lid + '/origin-' + sid + '.png';
-    const sticker = 'files/' + lid + '/sticker-' + sid + '.png';
+    const dir = 'files/' + lid;
 
-    sharp(origin)
-    .resize(512, 512)
-    .max()
-    .toFile(sticker)
+    resizePng(dir, sid)
     .catch((error) => {
-      console.error(error);
       msg.timestamp = Date.now() + 9487 * 1000;
-      meta.error.push(sid);
-      var text = '發生錯誤，已中斷下載\n';
-      text += '問題來源: NodeJS <b>sharp</b> (圖片轉檔工具)\n';
-      text += '編號: <code>' + lid + '</code> \n';
-      text += '詳細報告: addStickerToSet\n';
-      text += '<pre>' + enHTML(JSON.stringify(error)) + '</pre>';
-      bot1.editMessageText(text, {
+      bot1.editMessageText(error, {
         chat_id: msg.chat.id,
         message_id: msg.msgId,
         parse_mode: 'HTML'
       });
     })
-    .then((data) => {
+    .then((sticker) => {
       bot2.addStickerToSet(msg.from.id, meta.name, sticker, meta.emoji)
       .catch((error) => {
         meta.error.push(sid);
@@ -532,6 +513,7 @@ function uploadBody(msg, lid) {
           text = '貼圖數量衝破天際啦~\n';
           text += '貼圖包連結: <a href="https://t.me/addstickers/' + meta.name + '">' + enHTML(meta.title) + '</a>\n';
         } else {
+          text = '發生錯誤，已中斷下載\n';
           text += '編號: <code>' + lid + '</code> \n';
         }
         text += '\n詳細報告: addStickerToSet\n';
@@ -586,8 +568,8 @@ function uploadBody(msg, lid) {
             }
           });
 
-            checkPack(msg, lid);
-        } else if (Date.now() - msg.timestamp > 500) {
+          checkPack(msg, lid);
+        } else if (Date.now() - msg.timestamp > 300) {
           msg.timestamp = Date.now();
           var text = '上傳 <a href="https://store.line.me/stickershop/product/' + lid + '/' + meta['lang'] + '">' + enHTML(meta.title) + '</a> 中...\n';
           text += prog(meta.done.length, meta.stickers.length);
@@ -788,6 +770,51 @@ async function downloadZip(lid) {
         reject(text);
       });
     });
+  });
+}
+
+async function resizePng(dir, sid, q = 100) {
+  return new Promise(function(resolve, reject) {
+    const origin = dir + '/origin-' + sid + '.png';
+    const sticker = dir + '/sticker-' + sid + '.png';
+    const webp = dir + '/sticker-' + sid + '.webp';
+
+    sharp(origin)
+    .resize(512, 512)
+    .max()
+    .webp({quality: q})
+    .toFile(webp)
+    .catch((error) => {
+      var text = '發生錯誤，已中斷下載\n';
+      text += '問題來源: NodeJS <b>sharp</b> (圖片轉檔工具)\n';
+      text += '編號: <code>' + lid + '</code> \n';
+      text += '詳細報告: resize webp\n';
+      text += '<pre>' + enHTML(JSON.stringify(error)) + '</pre>';
+      reject(text);
+    })
+    .then((result) => {
+      sharp(webp)
+      .png()
+      .toFile(sticker)
+      .catch((error) => {
+        var text = '發生錯誤，已中斷下載\n';
+        text += '問題來源: NodeJS <b>sharp</b> (圖片轉檔工具)\n';
+        text += '編號: <code>' + lid + '</code> \n';
+        text += '詳細報告: convert png\n';
+        text += '<pre>' + enHTML(JSON.stringify(error)) + '</pre>';
+        reject(text);
+      })
+      .then((result) => {
+        var stat = fs.statSync(sticker);
+        if (stat.size < 512 * 1000) {
+          resolve(sticker);
+          return;
+        }
+        resizePng(dir, sid, q-20)
+        .catch(reject)
+        .then(resolve);
+      });
+    })
   });
 }
 
