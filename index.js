@@ -37,11 +37,23 @@ const bot2 = new TelegramBot(config.token2);
 bot1.on('message', (msg) => {
   console.log(msg);
 
+  if (msg.sticker !== undefined) {
+    var text = '您的使用者編號: <code>' + msg.from.id + '</code>\n';
+    text += '貼圖包編號: <code>' + msg.sticker.set_name + '</code>\n';
+    text += '貼圖表符: ' + msg.sticker.emoji + ' (<a href="http://telegra.ph/Sticker-emoji-06-03">修改教學</a>)\n';
+    text += '貼圖大小: <b>' + msg.sticker.width + '</b>x<b>' + msg.sticker.height + '</b>\n';
+    bot1.sendMessage(msg.chat.id, text, {
+      reply_to_message_id: msg.message_id,
+      parse_mode: 'HTML'
+    });
+    return;
+  }
+
   if (msg.text === undefined)
     return;
 
   if (msg.text === '/stop') {
-    if (config.indexOf(msg.from.id) < 0)
+    if (config.admins.indexOf(msg.from.id) < 0)
       return;
 
     stopping = !stopping;
@@ -81,7 +93,17 @@ bot1.on('message', (msg) => {
     return;
   }
 
-  var found = msg.text.match(/(?:line.me\/(?:S\/sticker|stickershop\/product)\/|\/line[_ ]?)(\d+)/);
+  if (msg.text == '/start edit_emoji') {
+    var text = '這邊有教學喔 :D\n';
+    text += 'http://telegra.ph/Sticker-emoji-06-03';
+
+    bot1.sendMessage(msg.chat.id, text, {
+      reply_to_message_id: msg.message_id,
+    });
+    return;
+  }
+
+  var found = msg.text.match(/(?:line.me\/(?:S\/sticker|stickershop\/product)\/|\/(?:line|start)[_ ]?)(\d+)/);
 
   if (!found) {
     if (msg.chat.id < 0)
@@ -167,8 +189,10 @@ bot1.on('message', (msg) => {
 
       if (meta.done !== undefined) {
         if (meta.done.length < meta.stickers.length) {
-          var stat = fs.statSync('files/' + lid);
-          if (Date.now() - stat.mtimeMs < 1 * 60 * 1000) {
+          var stat1 = fs.statSync('files/' + lid);
+          var stat2 = fs.statSync('files/' + lid + '/metadata');
+          if (Date.now() - stat1.mtimeMs < 1 * 60 * 1000
+           && Date.now() - stat2.mtimeMs < 1 * 60 * 1000) {
             var text = '已中斷下載，請五分鐘後重試\n'
             text += '可能原因：他人正在下載同款貼圖包\n';
             if (meta.done != undefined) {
@@ -215,6 +239,26 @@ bot1.on('message', (msg) => {
                   }
                 ]
               ]
+            }
+          });
+
+          bot2.getStickerSet('line' + lid + '_by_' + config.botName2)
+          .then((set) => {
+            if (set.stickers.length !== meta.stickers.length) {
+              bot1.editMessageReplyMarkup({
+                chat_id: msg.chat.id,
+                message_id: msg.msgId,
+                reply_markup: {
+                  inline_keyboard: [
+                    [
+                      {
+                        text: '砍掉重練 😈',
+                        'callback_data': 'remove_' + lid
+                      }
+                    ]
+                  ]
+                }
+              });
             }
           });
         }
@@ -403,7 +447,7 @@ function uploadBody(msg, lid) {
   }
   meta.error = [];
 
-  for (let i = 1; i < meta.stickers.length; i++) {
+  for (let i = 0; i < meta.stickers.length; i++) {
     const sid = meta.stickers[i].id;
     if (meta.done.indexOf(sid) > -1)
       continue;
@@ -480,6 +524,10 @@ function uploadBody(msg, lid) {
                   {
                     text: '點我安裝',
                     url: 'https://t.me/addstickers/' + meta.name
+                  },
+                  {
+                    text: '編輯表符',
+                    callback_data: 'done_edit_emoji_' + meta.name
                   }
                 ],
                 [
@@ -526,10 +574,12 @@ bot1.on('callback_query', (query) => {
     bot2.getStickerSet('line' + lid + '_by_' + config.botName2)
     .then((set) => {
       if (meta.done !== undefined) {
-        var stat = fs.statSync('files/' + lid);
-
-        if ((set.stickers.length === meta.done.length
-          || Date.now() - stat.mtimeMs < 3 * 60 * 1000)
+        var stat1 = fs.statSync('files/' + lid);
+        var stat2 = fs.statSync('files/' + lid + '/metadata');
+        if (((Date.now() - stat1.mtimeMs < 1 * 60 * 1000
+          && Date.now() - stat2.mtimeMs < 1 * 60 * 1000)
+          || meta.stickers.length !== meta.done.length
+          || meta.stickers.length === set.stickers.length)
           && config.admins.indexOf(query.from.id) < 0) {
           bot1.answerCallbackQuery(query.id, {
             text: '權限不足\n如貼圖包有問題，請至群組提出',
@@ -541,9 +591,7 @@ bot1.on('callback_query', (query) => {
       
       console.warn(query);
 
-      meta.title = set.title.replace(/ +@SeanChannel/, '');
-      meta.done = [];
-      if (meta.orig_title === undefined) {
+      if (meta.origin_title === undefined) {
         const langs = [
           'zh-Hant',
           'ja',
@@ -558,9 +606,12 @@ bot1.on('callback_query', (query) => {
           }
         });
         meta.origin_title = meta.title;
-        meta.title = meta['title'][meta.lang];
+        meta.title = set.title.replace(/ +@SeanChannel/, '');
+      }
+      if (meta.emoji === undefined) {
         meta.emoji = emojis[Math.floor(Math.random() * emojis.length)];
       }
+      meta.done = [];
 
       console.log(set);  
       for (var i=0; i<set.stickers.length; i++) {
@@ -576,12 +627,26 @@ bot1.on('callback_query', (query) => {
         parse_mode: 'HTML'
       });
 
-    fs.writeFile('files/' + lid + '/metadata', JSON.stringify(meta), (error) => { if (error) console.error(error) });
+      fs.writeFile('files/' + lid + '/metadata', JSON.stringify(meta), (error) => { if (error) console.error(error) });
 
       bot1.answerCallbackQuery(query.id, {
         text: '處理完成 👌',
         show_alert: 'true'
       });
+    });
+  }
+
+  if (query.data.startsWith('done_edit_emoji_')) {
+    var text = '這邊有教學喔 :D\n';
+    text += 'http://telegra.ph/Sticker-emoji-06-03';
+
+    bot1.sendMessage(msg.chat.id, text, {
+      reply_to_message_id: query.message.message_id
+    });
+
+    bot1.answerCallbackQuery(query.id, {
+      text: '您的貼圖編號: ' + query.data.substr(16),
+      show_alert: 'true'
     });
   }
 });
