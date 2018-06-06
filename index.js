@@ -2,6 +2,7 @@ const request = require('request');
 const fs = require('fs');
 const unzip = require('unzip2');
 const sharp = require('sharp');
+const Promise = require('bluebird');
 const TelegramBot = require('node-telegram-bot-api');
 const config = require('./config.json');
 
@@ -35,6 +36,9 @@ const langs = [
   'ko'
 ];
 
+const lineRegEx = /(?:line.me\/(?:S\/sticker|stickershop\/product)\/|line:.+?|Number=|\/(?:line|start)[_ ]*)(\d{3,})/;
+const sticonRegEx = /(?:line\.me\/(?:S\/emoji\/\?id=|emojishop\/product\/)|line:.+?|\/(?:line|start)[_ ]*)([0-9a-f]{24})/;
+
 let restarting = 0;
 
 setInterval(() => {
@@ -46,42 +50,56 @@ setInterval(() => {
   }
   var sec = Math.floor((restarting - Date.now()) / 1000);
   if (sec % 5 === 0) {
-    console.log('Restart in ' + Math.floor((restarting - Date.now()) / 1000) + ' seconds');
+    console.warn('Restart in ' + Math.floor((restarting - Date.now()) / 1000) + ' seconds');
   }
 }, 1000);
 
 setInterval(() => {
-  for (var lid in pendingSticker) {
-    if (pendingSticker[lid].cd === undefined) {
+  for (var lid in pendingStickers) {
+    if (pendingStickers[lid].cd === undefined) {
       continue;
     }
-    if (pendingSticker[lid].cd <= 0) {
+    if (pendingStickers[lid].cd <= 0) {
       continue;
     }
-    if (pendingSticker[lid].cd > Date.now()) {
+    if (pendingStickers[lid].cd > Date.now()) {
       continue;
     }
 
-    pendingSticker[lid].msg.timestamp = Date.now();   // reset error state
-    pendingSticker[lid].cd = 0;
-    uploadBody(pendingSticker[lid].msg, lid);
+    pendingStickers[lid].msg.timestamp = Date.now();   // reset error state
+    pendingStickers[lid].cd = 0;
+    uploadBody(pendingStickers[lid].msg, lid);
   }
 
-  for (var lid in pendingSticker) {
-    if (pendingSticker[lid].deleting === undefined) {
+  for (var lid in pendingStickers) {
+    if (pendingStickers[lid].deleting === undefined) {
       continue;
     }
 
     bot2.getStickerSet('line' + lid + '_by_' + config.botName2)
+    .catch((error) => {
+      if (error.message.includes('STICKERSET_INVALID')) {
+        console.error('STICKERSET_INVALID', lid);
+        pendingStickers[lid].deleting = false;
+
+        fs.unlinkSync('files/' + lid + '/metadata');
+        downloadPack(pendingStickers[lid].msg, lid);
+      }
+    })
     .then((set) => {
-      console.log('deleting', lid, set.stickers.length);
-      if (set.stickers.length === 0) {
-        delete pendingSticker[lid].deleting;
-        pendingSticker[lid].cd = 0;
-        uploadBody(pendingSticker[lid].msg, lid);
+      if (pendingStickers[lid].deleting === false) {
+        delete pendingStickers[lid];
         return;
       }
 
+      if (set.stickers.length === 0) {
+        delete pendingStickers[lid].deleting;
+        pendingStickers[lid].cd = 0;
+        uploadBody(pendingStickers[lid].msg, lid);
+        return;
+      }
+
+      console.warn('del sticker from set', lid, set.stickers.length);
       for (var i=0; i<set.stickers.length; i++) {
         bot2.deleteStickerFromSet(set.stickers[i].file_id);
       }
@@ -89,18 +107,23 @@ setInterval(() => {
   }
 }, 1000);
 
+Promise.config({
+  cancellation: true,
+});
+
 const bot1 = new TelegramBot(config.token1, {
-  polling: true
+  polling: true,
+  filepath: false
 });
 
 const bot2 = new TelegramBot(config.token2);
 
 const userCD = {};
-const pendingSticker = {};
+const pendingStickers = {};
 
 bot1.on('message', (msg) => {
   if (userCD[msg.from.id] !== undefined) {
-    if (Date.now() - userCD[msg.from.id] <  2 * 1000)
+    if (Date.now() - userCD[msg.from.id] <  1000)
       return;
   }
   userCD[msg.from.id] = Date.now();
@@ -160,15 +183,41 @@ bot1.on('message', (msg) => {
       var sec = 60;
       if (msg.text.length > 9) {
         sec = msg.text.substr(9);
+        if (sec < 10)
+          sec = 10;
       }
       restarting = Date.now() + sec * 1000;
-      text += '已開啟停機模式';
+      text += '⚠️ 已開啟停機模式';
     } else {
       restarting = 0;
-      text += '已恢復正常模式';
+      text += '👌 已恢復正常模式';
     }
     bot1.sendMessage(msg.chat.id, text, {
       reply_to_message_id: msg.message_id,
+    });
+    return;
+  }
+
+  if (msg.text.startsWith('/debug')) {
+    if (config.admins.indexOf(msg.from.id) < 0)
+      return;
+
+    console.log(pendingStickers);
+    var text = 'pendingStickers:\n';
+    for (var id in pendingStickers) {
+      text += '/line_' + id + '\n';
+      if (pendingStickers[lid].cd !== undefined
+        && pendingStickers[id].cd > 0) {
+        sec = Math.floor((pendingStickers[id].cd - Date.now()) / 1000);
+        text += 'CD: ' + sec + ' seconds\n';
+      }
+    }
+
+    bot1.sendMessage(msg.chat.id, text, {
+      reply_to_message_id: msg.message_id,
+    })
+    .catch((error) => {
+      console.error('/debug command', error);
     });
     return;
   }
@@ -234,9 +283,10 @@ bot1.on('message', (msg) => {
     return;
   }
 
-  var found = msg.text.match(/(?:line.me\/(?:S\/sticker|stickershop\/product)\/|line:.+?|Number=|\/(?:line|start)[_ ]*)(\d{3,})/);
+  var found1 = msg.text.match(lineRegEx);
+  var found2 = msg.text.match(sticonRegEx);
 
-  if (!found) {
+  if (!found1 && !found2) {
     if (msg.chat.id < 0)
       return;
     var text = '歡迎使用 LINE 貼圖轉換器\n';
@@ -281,7 +331,22 @@ bot1.on('message', (msg) => {
     return;
   }
 
-  const lid = found[1];
+  if (found2) {
+    const eid = found2[1];
+    console.log('found eid', eid);
+
+    var text = '尚未支援<b>表情貼</b>喔\n\n';
+    text += '敬請期待 😉';
+    bot1.sendMessage(msg.chat.id, text, {
+      parse_mode: 'HTML',
+      reply_to_message_id: msg.message_id,
+    });
+
+    downloadSticon(eid);
+    return;
+  }
+
+  const lid = found1[1];
 
   if (!fs.existsSync('files/' + lid)) {
     fs.mkdirSync('files/' + lid);
@@ -339,7 +404,7 @@ bot1.on('message', (msg) => {
         return;
       }
 
-      if (pendingSticker[lid] !== undefined) {
+      if (pendingStickers[lid] !== undefined) {
         var text = '已中斷下載\n'
         text += '原因: 他人正在下載同款貼圖包\n';
         if (meta.done != undefined) {
@@ -414,8 +479,37 @@ bot1.on('message', (msg) => {
   })
   .then((result) => {
     msg.msgId = result.message_id;
+    downloadPack(msg, lid);
+  });
+});
 
-    downloadZip(lid)
+function downloadPack(msg, lid) {
+  fs.appendFile('files/' + lid + '/download-pack-' + Date.now(), JSON.stringify(msg), (error) => { console.error(error) });
+
+  downloadZip(lid)
+  .catch((error) => {
+    msg.timestamp = Date.now() + 9487 * 1000;
+    bot1.editMessageText(error, {
+      chat_id: msg.chat.id,
+      message_id: msg.msgId,
+      parse_mode: 'HTML'
+    });
+  })
+  .then((dir) => {
+    if (msg.timestamp > Date.now())
+      return;
+
+    const meta = JSON.parse(fs.readFileSync('files/' + lid + '/metadata', 'utf8'));
+
+    var text = '已取得 <a href="https://store.line.me/stickershop/product/' + lid + '/' + meta['lang'] + '">' + enHTML(meta.title) + '</a> 資訊...\n';
+    bot1.editMessageText(text, {
+      chat_id: msg.chat.id,
+      message_id: msg.msgId,
+      parse_mode: 'HTML'
+    });
+
+    const sid = meta.stickers[0].id;
+    resizePng(dir, sid)
     .catch((error) => {
       msg.timestamp = Date.now() + 9487 * 1000;
       bot1.editMessageText(error, {
@@ -424,96 +518,87 @@ bot1.on('message', (msg) => {
         parse_mode: 'HTML'
       });
     })
-    .then((dir) => {
+    .then((sticker) => {
       if (msg.timestamp > Date.now())
         return;
 
-      const meta = JSON.parse(fs.readFileSync('files/' + lid + '/metadata', 'utf8'));
-
-      var text = '已取得 <a href="https://store.line.me/stickershop/product/' + lid + '/' + meta['lang'] + '">' + enHTML(meta.title) + '</a> 資訊...\n';
-      bot1.editMessageText(text, {
-        chat_id: msg.chat.id,
-        message_id: msg.msgId,
-        parse_mode: 'HTML'
-      });
-
-      const sid = meta.stickers[0].id;
-      resizePng(dir, sid)
+      const stickerStream = fs.createReadStream(sticker);
+      const fileOptions = {
+        filename: 'sean-' + sid + '.png',
+        contentType: 'image/png',
+      };
+      bot2.createNewStickerSet(msg.from.id, meta.name, meta.title + "  @SeanChannel", stickerStream, meta.emoji, {}, fileOptions)
       .catch((error) => {
         msg.timestamp = Date.now() + 9487 * 1000;
-        bot1.editMessageText(error, {
-          chat_id: msg.chat.id,
-          message_id: msg.msgId,
-          parse_mode: 'HTML'
-        });
-      })
-      .then((sticker) => {
-        if (msg.timestamp > Date.now())
-          return;
+        meta.error.push(sid);
 
-        const stat = fs.statSync(sticker);
-        if (stat.size > 512 * 1000) {
-        }
-
-        bot2.createNewStickerSet(msg.from.id, meta.name, meta.title + "  @SeanChannel", sticker, meta.emoji)
-        .catch((error) => {
-          msg.timestamp = Date.now() + 9487 * 1000;
-          meta.error.push(sid);
-
-          var text = '發生錯誤，已中斷下載\n';
-          if (error.message.includes('user not found')) {
-            text += '請確定 <a href="https://t.me/' + config.botName2 + '">已於此啟動過機器人</a>\n';
-          } else {
-            text += '編號: <code>' + lid + '</code> \n';
-            checkPack(msg, lid)
-            .catch((text) => {
-              bot1.editMessageText(text, {
-                chat_id: msg.chat.id,
-                message_id: msg.msgId,
-                parse_mode: 'HTML',
-                reply_markup: {
-                  inline_keyboard: [
-                    [
-                      {
-                        text: '🔔 好了通知我一聲',
-                        callback_data: 'notify_' + lid
-                      }
-                    ]
-                  ]
-                }
-              });
-            });
-          }
-          text += '詳細報告: createNewStickerSet\n';
-          text += '<pre>' + enHTML(JSON.stringify(error)) + '</pre>';
+        if (error.message.includes('user not found')) {
+          var text = '請確定 <a href="https://t.me/' + config.botName2 + '">已於此啟動過機器人</a>\n';
           bot1.editMessageText(text, {
             chat_id: msg.chat.id,
             message_id: msg.msgId,
             disable_web_page_preview: true,
             parse_mode: 'HTML'
           });
-        })
-        .then((result) => {
-          if (msg.timestamp > Date.now())
-            return;
-          if (meta.error.indexOf(sid) < 0) {
-            meta.done = [ sid ];
-            fs.writeFileSync(dir + '/metadata', JSON.stringify(meta));
-            var text = '建立 <a href="https://store.line.me/stickershop/product/' + lid + '/' + meta['lang'] + '">' + enHTML(meta.title) + '</a> 中...\n';
-            text += prog(meta.done.length, meta.stickers.length);
-            bot1.editMessageText(text, {
-              chat_id: msg.chat.id,
-              message_id: msg.msgId,
-              parse_mode: 'HTML'
-            });
-            uploadBody(msg, lid);
-          }
-          fs.appendFile(dir + '/request', JSON.stringify(msg), (error) => { console.error(error) });
+          return;
+        }
+
+        var text = '發生錯誤，已中斷下載\n';
+        text += '編號: <code>' + lid + '</code> \n';
+        text += '詳細報告: createNewStickerSet\n';
+        text += '<pre>' + enHTML(JSON.stringify(error)) + '</pre>';
+        bot1.editMessageText(text, {
+          chat_id: msg.chat.id,
+          message_id: msg.msgId,
+          disable_web_page_preview: true,
+          parse_mode: 'HTML'
         });
+
+        if (error.message.includes('created sticker set not found')) {
+          console.error('created sticker set not found', lid);
+          delete pendingStickers[lid];
+          return;
+        }
+
+        checkPack(msg, lid)
+        .catch((text) => {
+          bot1.editMessageText(text, {
+            chat_id: msg.chat.id,
+            message_id: msg.msgId,
+            parse_mode: 'HTML',
+            reply_markup: {
+              inline_keyboard: [
+                [
+                  {
+                    text: '🔔 好了通知我一聲',
+                    callback_data: 'notify_' + lid
+                  }
+                ]
+              ]
+            }
+          });
+        });
+      })
+      .then((result) => {
+        if (msg.timestamp > Date.now())
+          return;
+
+        if (meta.error.indexOf(sid) < 0) {
+          meta.done = [ sid ];
+          fs.writeFileSync(dir + '/metadata', JSON.stringify(meta));
+          var text = '建立 <a href="https://store.line.me/stickershop/product/' + lid + '/' + meta['lang'] + '">' + enHTML(meta.title) + '</a> 中...\n';
+          text += prog(meta.done.length, meta.stickers.length);
+          bot1.editMessageText(text, {
+            chat_id: msg.chat.id,
+            message_id: msg.msgId,
+            parse_mode: 'HTML'
+          });
+          uploadBody(msg, lid);
+        }
       });
     });
   });
-});
+}
 
 function uploadBody(msg, lid) {
   if (restarting > 0 && config.admins.indexOf(msg.from.id) < 0 && config.admins.indexOf(msg.chat.id) < 0) {
@@ -546,8 +631,8 @@ function uploadBody(msg, lid) {
   }
   meta.error = [];
 
-  if (pendingSticker[lid] === undefined) {
-    pendingSticker[lid] = {
+  if (pendingStickers[lid] === undefined) {
+    pendingStickers[lid] = {
       cd: 0,
       msg: msg
     };
@@ -570,6 +655,9 @@ function uploadBody(msg, lid) {
   }
 
   for (let i = 0; i < meta.stickers.length; i++) {
+    if (Date.now() < msg.timestamp)   // Previous stickers
+      return;
+
     const sid = meta.stickers[i].id;
     if (meta.done.indexOf(sid) > -1)
       continue;
@@ -586,14 +674,20 @@ function uploadBody(msg, lid) {
       });
     })
     .then((sticker) => {
-      bot2.addStickerToSet(msg.from.id, meta.name, sticker, meta.emoji)
+      if (Date.now() < msg.timestamp)
+        return;
+      const stickerStream = fs.createReadStream(sticker);
+      const fileOptions = {
+        filename: 'sean-' + sid + '.png',
+        contentType: 'image/png',
+      };
+      bot2.addStickerToSet(msg.from.id, meta.name, stickerStream, meta.emoji, {}, fileOptions)
       .catch((error) => {
         meta.error.push(sid);
         if (Date.now() < msg.timestamp)
           return;
         msg.timestamp = Date.now() + 9487 * 1000;
 
-        var text;
         var opt = {
           chat_id: msg.chat.id,
           message_id: msg.msgId,
@@ -603,13 +697,14 @@ function uploadBody(msg, lid) {
         if (error.message.includes('user not found')) {
           text = '請確定 <a href="https://t.me/' + config.botName2 + '">已於此啟動過機器人</a>\n';
           text += '點擊 /line_' + lid + ' 重試\n';
+          bot1.editMessageText(text, opt);
         } else if (error.message.includes('retry after')) {
           text = '上傳速度太快啦，TG 伺服器要冷卻一下\n';
           text += '將會自動重試\n';
           text += prog(meta.done.length, meta.stickers.length);
           text += '貼圖包連結: <a href="https://t.me/addstickers/' + meta.name + '">' + enHTML(meta.title) + '</a>\n';
           sec = error.message.substr(46) + 3;
-          pendingSticker[lid].cd = Date.now() + sec * 1000;
+          pendingStickers[lid].cd = Date.now() + sec * 1000;
           opt['reply_markup'] = {
             inline_keyboard: [
               [
@@ -620,12 +715,31 @@ function uploadBody(msg, lid) {
               ]
             ]
           };
+
+          text += '\n詳細報告: addStickerToSet\n';
+          text += '<pre>' + enHTML(JSON.stringify(error)) + '</pre>';
+          bot1.editMessageText(text, opt);
         } else if (error.message.includes('STICKERS_TOO_MUCH')) {
           text = '貼圖數量衝破天際啦~\n';
           text += '貼圖包連結: <a href="https://t.me/addstickers/' + meta.name + '">' + enHTML(meta.title) + '</a>\n';
+          text += '\n詳細報告: addStickerToSet\n';
+          text += '<pre>' + enHTML(JSON.stringify(error)) + '</pre>';
+          bot1.editMessageText(text, opt);
+
+          checkPack(msg, lid)
+          .catch((err) => {
+            bot1.editMessageText(text, {
+              chat_id: msg.chat.id,
+              message_id: msg.msgId,
+              parse_mode: 'HTML'
+            });
+          });
         } else {
           text = '發生錯誤，已中斷下載\n';
           text += '編號: <code>' + lid + '</code> \n';
+          text += '\n詳細報告: addStickerToSet\n';
+          text += '<pre>' + enHTML(JSON.stringify(error)) + '</pre>';
+          bot1.editMessageText(text, opt);
 
           checkPack(msg, lid)
           .catch((err) => {
@@ -636,11 +750,6 @@ function uploadBody(msg, lid) {
             });
           });
         }
-
-        text += '\n詳細報告: addStickerToSet\n';
-        text += '<pre>' + enHTML(JSON.stringify(error)) + '</pre>';
-
-        bot1.editMessageText(text, opt);
       })
       .then((result) => {
         if (meta.error.indexOf(sid) > -1)
@@ -686,11 +795,11 @@ function uploadBody(msg, lid) {
             }
           });
 
-          if (Array.isArray(pendingSticker[lid].users)) {
-            for (var i=0; i<pendingSticker[lid].users.length; i++) {
+          if (Array.isArray(pendingStickers[lid].users)) {
+            for (var i=0; i<pendingStickers[lid].users.length; i++) {
               var text = '您訂閱的 <a href="https://t.me/addstickers/' + meta.name + '">' + enHTML(meta.title) + '</a> 上傳完成囉 😃\n';
               text += '共 <b>' + meta.stickers.length + '</b> 張貼圖，快來試用看看吧！\n';
-              bot1.sendMessage(pendingSticker[lid].users[i], text, {
+              bot1.sendMessage(pendingStickers[lid].users[i], text, {
                 parse_mode: 'HTML',
                 reply_markup: {
                   inline_keyboard: [
@@ -714,7 +823,7 @@ function uploadBody(msg, lid) {
             }
           }
 
-          delete pendingSticker[lid];
+          delete pendingStickers[lid];
         } else if (Date.now() - msg.timestamp > 300) {
           msg.timestamp = Date.now();
           var text = '上傳 <a href="https://store.line.me/stickershop/product/' + lid + '/' + meta['lang'] + '">' + enHTML(meta.title) + '</a> 中...\n';
@@ -770,7 +879,7 @@ function uploadBody(msg, lid) {
 
 bot1.on('callback_query', (query) => {
   if (userCD[query.from.id] !== undefined) {
-    if (Date.now() - userCD[query.from.id] <  2 * 1000)
+    if (Date.now() - userCD[query.from.id] <  1000)
       return;
   }
   userCD[query.from.id] = Date.now();
@@ -842,14 +951,14 @@ bot1.on('callback_query', (query) => {
     const lid = query.data.substr(7);
     const uid = query.from.id;
     var text;
-    if (pendingSticker[lid] === undefined) {
+    if (pendingStickers[lid] === undefined) {
       text = '這款貼圖不在佇列中欸';
     } else {
-      if (pendingSticker[lid].users === undefined) {
-        pendingSticker[lid].users = [];
+      if (pendingStickers[lid].users === undefined) {
+        pendingStickers[lid].users = [];
       }
-      if (pendingSticker[lid].users.indexOf(uid) < 0) {
-        pendingSticker[lid].users.push(uid);
+      if (pendingStickers[lid].users.indexOf(uid) < 0) {
+        pendingStickers[lid].users.push(uid);
         text = '訂閱完成！\n';
       } else {
         text = '您已經訂閱過了喔！\n';
@@ -967,11 +1076,13 @@ async function resizePng(dir, sid, q = 100) {
     var tmpFile = dir + '/sticker-' + sid + '-' + q + '.webp';
     var size = 512;
     if (q < 64) {
-      console.log(dir, sid, q);
+      console.log('resize png comp', dir, sid, q);
       format = 'jpg';
       tmpFile = dir + '/sticker-' + sid + '-' + q + '.jpg';
       size = 8 * q;
     }
+
+    var error = false;
 
     sharp(origin)
     .toFormat(format, {
@@ -981,6 +1092,9 @@ async function resizePng(dir, sid, q = 100) {
     .max()
     .toFile(tmpFile)
     .catch((error) => {
+      console.error('sharp', sid, error);
+      error = true;
+
       var text = '發生錯誤，已中斷下載\n';
       text += '問題來源: NodeJS <b>sharp</b> (圖片轉檔工具)\n';
       text += '編號: <code>' + sid + '</code> \n';
@@ -989,12 +1103,20 @@ async function resizePng(dir, sid, q = 100) {
       return reject(text);
     })
     .then((result) => {
+      if (error) {
+        console.error('resizePng', 'error = true', 'stage 1', result);
+        return;
+      }
+
       sharp(tmpFile)
       .resize(512, 512)
       .max()
       .png()
       .toFile(sticker)
       .catch((error) => {
+        console.error('sharp', sid, error);
+        error = true;
+
         var text = '發生錯誤，已中斷下載\n';
         text += '問題來源: NodeJS <b>sharp</b> (圖片轉檔工具)\n';
         text += '編號: <code>' + sid + '</code> \n';
@@ -1003,15 +1125,27 @@ async function resizePng(dir, sid, q = 100) {
         return reject(text);
       })
       .then((result) => {
+        if (error) {
+          console.error('resizePng', 'error = true', 'stage 2', result);
+          return;
+        }
+
         var stat = fs.statSync(sticker);
         if (stat.size < 512 * 1000) {
           return resolve(sticker);
         }
         resizePng(dir, sid, Math.floor(q*0.8))
         .catch((err) => {
+          error = true;
+
           return reject(err + '.');
         })
         .then((sticker) => {
+          if (error) {
+            console.error('resizePng', 'error = true', 'stage 3', result);
+            return;
+          }
+
           return resolve(sticker);
         });
       });
@@ -1036,7 +1170,7 @@ async function checkPack(msg, lid) {
         return reject(err);
       })
       .then(() => {
-        pendingSticker[lid] = {
+        pendingStickers[lid] = {
           msg: msg,
           deleting: true
         };
@@ -1045,7 +1179,7 @@ async function checkPack(msg, lid) {
       });
     })
     .then((set) => {
-      if (pendingSticker[lid] !== undefined) {
+      if (pendingStickers[lid] !== undefined) {
         return resolve('看起來有人正在下載呢');
       }
 
@@ -1060,7 +1194,7 @@ async function checkPack(msg, lid) {
         return reject(err);
       })
       .then(() => {
-        pendingSticker[lid] = {
+        pendingStickers[lid] = {
           msg: msg,
           deleting: true
         };
@@ -1068,6 +1202,45 @@ async function checkPack(msg, lid) {
         return reject('已排入處理佇列\n將會自動重新下載');
       });
     });
+  });
+}
+
+function downloadSticon(eid) {
+  return new Promise(function(resolve, reject) {
+    const dir = 'files/' + eid;
+    console.log('downloadSticon', 'dir name', dir);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir);
+    }
+
+    for (var seq=1; seq<=40; seq++) {
+      var seqStr = ('000' + seq).slice(-3);
+      var filename =  dir + '/' + seqStr + '.png';
+      if (!fs.existsSync(filename)) {
+        request('https://stickershop.line-scdn.net/sticonshop/v1/sticon/' + eid + '/iphone/' + seqStr + '.png')
+        .pipe(fs.createWriteStream(filename))
+        .on('error', function (err) {
+          var text = '發生錯誤，已中斷下載\n';
+          text += '編號: <code>' + eid + '</code>, ' + seqStr + '\n';
+          text += '詳細報告: NodeJS <b>request</b> onError\n';
+          text += '<pre>' + enHTML(JSON.stringify(err)) + '</pre>';
+          return reject(text);
+        })
+        .on('finish', (result) => {
+          const stat = fs.statSync(filename);
+          if (stat.size < 69) {
+            const context = fs.readFileSync(filename);
+            var text = '發生錯誤，已中斷下載\n';
+            text += '詳細報告: LINE 伺服器提供檔案不正常\n';
+            text += '下載內容:\n'
+            text += '<pre>' + enHTML(context) + '</pre>';
+            return reject(text);
+          }
+
+          fs.createReadStream(filename)
+        });
+      }
+    }
   });
 }
 

@@ -8,6 +8,7 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "bluebird": "^3.5.1",
     "node-telegram-bot-api": "^0.30.0",
     "request": "^2.87.0",
     "sharp": "^0.20.3",
