@@ -9,6 +9,7 @@
   "license": "ISC",
   "dependencies": {
     "bluebird": "^3.5.1",
+    "cheerio": "^1.0.0-rc.2",
     "node-telegram-bot-api": "^0.30.0",
     "request": "^2.87.0",
     "sharp": "^0.20.3",
