@@ -67,16 +67,6 @@ setInterval(() => {
       continue;
     }
 
-    if (pendingStickers[lid].ec === undefined) {
-      pendingStickers[lid].ec = 0;
-    }
-    pendingStickers[lid].ec++;   // Error count
-    if (pendingStickers[lid].ec > 3) {   // Tried more than 3 times
-      console.log('delete pending sticker for tried 3 times', lid, pendingStickers[lid]);
-      delete pendingStickers[lid];
-      continue;
-    }
-
     pendingStickers[lid].msg.timestamp = Date.now();   // reset error state
     pendingStickers[lid].cd = 0;
     uploadBody(pendingStickers[lid].msg, lid);
@@ -210,11 +200,71 @@ bot1.on('message', (msg) => {
     return;
   }
 
-  if (msg.text.startsWith('/debug')) {
-    if (config.admins.indexOf(msg.from.id) < 0)
-      return;
+  if (msg.text == '/start SECRET') {
+    var text = '歡迎使用 LINE 貼圖轉換器\n';
+    text += '您已啟動完成，直接分享貼圖連結過來，就會自動下載囉~\n\n';
+    text += '如有任何疑慮，歡迎至<a href="https://t.me/StickerGroup">貼圖群</a>詢問';
 
-    console.log(pendingStickers);
+    bot1.sendMessage(msg.chat.id, text, {
+      parse_mode: 'HTML',
+      reply_to_message_id: msg.message_id,
+      disable_web_page_preview: true,
+      reply_markup: {
+        inline_keyboard: [
+          [
+            {
+              text: '探索更多貼圖',
+              url: 'https://t.me/StickerGroup'
+            }
+          ]
+        ]
+      }
+    });
+    return;
+  }
+
+  if (msg.text == '/start edit_emoji') {
+    var text = '這邊有教學喔 :D\n';
+    text += 'http://telegra.ph/Sticker-emoji-06-03';
+
+    bot1.sendMessage(msg.chat.id, text, {
+      reply_to_message_id: msg.message_id
+    });
+    return;
+  }
+
+  if (msg.text == '/start about' || msg.text == '/about') {
+    var text = '原始碼: <a href="https://git.io/line">GitHub</a>\n\n';
+    text += '別忘了參考我的另一個專案 <a href="https://t.me/Telegreat">Telegreat Desktop</a>\n';
+    text += '支援<a href="https://t.me/TelegreatFAQ/8">匯出貼圖連結</a>，效果參見<a href="https://t.me/StickerGroup/67327">這裡</a>\n\n';
+    text += '假如您的 LINE 貼圖不希望被轉換，請向<a href="https://t.me/SeanChannel">開發者</a>反應，將會協助加入黑名單\n';
+    text += '有任何建議，歡迎至<a href="https://t.me/StickerGroup">貼圖群</a>或是 <a href="https://t.me/AntiLINE">Anti-LINE 群</a>提出';
+
+    bot1.sendMessage(msg.chat.id, text, {
+      reply_to_message_id: msg.message_id,
+      parse_mode: 'HTML',
+      reply_markup: {
+        inline_keyboard: [
+          [
+            {
+              text: '更多小玩意',
+              url: 'https://t.me/SeanChannel'
+            },
+            {
+              text: '貼圖匯出工具',
+              url: 'https://t.me/Telegreat'
+            }
+          ]
+        ]
+      }
+    });
+    return;
+  }
+
+  if (msg.text == '/queue') {
+    if (config.admins.indexOf(msg.from.id) > -1) {
+      console.log(pendingStickers);
+    }
     var text = '目前佇列\n\n';
     for (var id in pendingStickers) {
       if (fs.existsSync('files/' + id + '/metadata')) {
@@ -250,68 +300,7 @@ bot1.on('message', (msg) => {
       reply_to_message_id: msg.message_id,
     })
     .catch((error) => {
-      console.error('/debug command', error);
-    });
-    return;
-  }
-
-  if (msg.text == '/start SECRET') {
-    var text = '歡迎使用 LINE 貼圖轉換器\n';
-    text += '您已啟動完成，直接分享貼圖連結過來，就會自動下載囉~\n\n';
-    text += '如有任何疑慮，歡迎至<a href="https://t.me/StickerGroup">貼圖群</a>詢問';
-
-    bot1.sendMessage(msg.chat.id, text, {
-      parse_mode: 'HTML',
-      reply_to_message_id: msg.message_id,
-      disable_web_page_preview: true,
-      reply_markup: {
-        inline_keyboard: [
-          [
-            {
-              text: '探索更多貼圖',
-              url: 'https://t.me/StickerGroup'
-            }
-          ]
-        ]
-      }
-    });
-    return;
-  }
-
-  if (msg.text == '/start edit_emoji') {
-    var text = '這邊有教學喔 :D\n';
-    text += 'http://telegra.ph/Sticker-emoji-06-03';
-
-    bot1.sendMessage(msg.chat.id, text, {
-      reply_to_message_id: msg.message_id
-    });
-    return;
-  }
-
-  if (msg.text == '/start about') {
-    var text = '原始碼: <a href="https://git.io/line">GitHub</a>\n\n';
-    text += '別忘了參考我的另一個專案 <a href="https://t.me/Telegreat">Telegreat Desktop</a>\n';
-    text += '支援<a href="https://t.me/TelegreatFAQ/8">匯出貼圖連結</a>，效果參見<a href="https://t.me/StickerGroup/67327">這裡</a>\n\n';
-    text += '假如您的 LINE 貼圖不希望被轉換，請向<a href="https://t.me/SeanChannel">開發者</a>反應，將會協助加入黑名單\n';
-    text += '有任何建議，歡迎至<a href="https://t.me/StickerGroup">貼圖群</a>或是 <a href="https://t.me/AntiLINE">Anti-LINE 群</a>提出';
-
-    bot1.sendMessage(msg.chat.id, text, {
-      reply_to_message_id: msg.message_id,
-      parse_mode: 'HTML',
-      reply_markup: {
-        inline_keyboard: [
-          [
-            {
-              text: '更多小玩意',
-              url: 'https://t.me/SeanChannel'
-            },
-            {
-              text: '貼圖匯出工具',
-              url: 'https://t.me/Telegreat'
-            }
-          ]
-        ]
-      }
+      console.error('/queue command', error);
     });
     return;
   }
@@ -605,8 +594,10 @@ function downloadPack(msg, lid) {
     fs.appendFile(dir + '/download-pack-' + Date.now(), JSON.stringify(msg), (error) => { console.error(error) });
     console.log('downloadPack unzip', dir);
 
-    if (msg.timestamp > Date.now())
+    if (msg.timestamp > Date.now()) {
+      console.log('downloadPack return due to error, ts:', msg.timestamp - Date.now());
       return;
+    }
 
     const meta = JSON.parse(fs.readFileSync(dir + '/metadata', 'utf8'));
 
@@ -618,6 +609,7 @@ function downloadPack(msg, lid) {
     });
 
     const sid = meta.stickers[0].id;
+    console.log('downloadPack ready to resize Png', lid, sid);
     resizePng(dir, sid)
     .catch((error) => {
       msg.timestamp = Date.now() + 9487 * 1000;
@@ -782,6 +774,17 @@ function uploadBody(msg, lid) {
     return;
   }
 
+
+  if (pendingStickers[lid].counter === undefined) {
+    pendingStickers[lid].counter = 0;
+  }
+  pendingStickers[lid].counter++;
+  if (pendingStickers[lid].counter > 3) {   // Tried more than 5 times
+    console.log('delete pending sticker for tried 5 times', lid, pendingStickers[lid]);
+    delete pendingStickers[lid];
+    return;
+  }
+
   console.log('uploadBody ready for', lid, meta.stickers.length);
   for (let i = 0; i < meta.stickers.length; i++) {
     if (Date.now() < msg.timestamp)   // Previous stickers
@@ -814,7 +817,7 @@ function uploadBody(msg, lid) {
       };
       bot2.addStickerToSet(msg.from.id, meta.name, stickerStream, meta.emoji, {}, fileOptions)
       .catch((error) => {
-        console.log('uploadBody addStickerToSet err', lid, sid, error.response.body);
+        console.log('uploadBody addStickerToSet err', lid, sid, error.message);
         meta.error.push(sid);
         if (Date.now() < msg.timestamp)
           return;
@@ -870,6 +873,7 @@ function uploadBody(msg, lid) {
           text += '<pre>' + enHTML(JSON.stringify(error)) + '</pre>';
           bot1.editMessageText(text, opt);
 
+          msg.timestamp = Date.now();   // Reset error state
           downloadPack(msg, lid);
         } else {
           text = '發生錯誤，已中斷下載\n';
@@ -1153,15 +1157,17 @@ async function downloadZip(lid) {
         meta.name = 'line' + lid + '_by_' + config.botName2;
         meta.emoji = emojis[Math.floor(Math.random() * emojis.length)];
 
-        langs.some(function (val) {
-          if (meta['title'][val] !== undefined) {
-            meta['lang'] = val;
-            return true;
-          }
-        });
+        if (meta.origin_title === undefined) {
+          langs.some(function (val) {
+            if (meta['title'][val] !== undefined) {
+              meta['lang'] = val;
+              return true;
+            }
+          });
 
-        meta.origin_title = meta.title;
-        meta.title = meta['title'][meta.lang];
+          meta.origin_title = meta.title;
+          meta.title = meta['title'][meta.lang];
+        }
 
         fs.writeFileSync(dir + '/metadata', JSON.stringify(meta));
 
