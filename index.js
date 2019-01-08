@@ -40,75 +40,6 @@ const langs = [
 const lineRegEx = /(?:line.me\/(?:S\/sticker|stickershop\/product)\/|line:.+?|Number=|\/(?:line|start)[_ ]*)(\d{3,})/;
 const sticonRegEx = /(?:line\.me\/(?:S\/emoji\/\?id=|emojishop\/product\/)|line:.+?|\/(?:line|start)[_ ]*)([0-9a-f]{24})/;
 
-let restarting = 0;
-
-setInterval(() => {
-  if (restarting === 0) {
-    return;
-  }
-  if (restarting < Date.now()) {
-    process.exit();
-  }
-  var sec = Math.floor((restarting - Date.now()) / 1000);
-  if (sec % 5 === 0) {
-    console.warn('Restart in ' + Math.floor((restarting - Date.now()) / 1000) + ' seconds');
-  }
-}, 1000);
-
-setInterval(() => {
-  for (var lid in pendingStickers) {
-    if (pendingStickers[lid].cd === undefined) {
-      continue;
-    }
-    if (pendingStickers[lid].cd <= 0) {
-      continue;
-    }
-    if (pendingStickers[lid].cd > Date.now()) {
-      continue;
-    }
-
-    pendingStickers[lid].msg.timestamp = Date.now();   // reset error state
-    pendingStickers[lid].cd = 0;
-    uploadBody(pendingStickers[lid].msg, lid);
-  }
-
-  for (var lid in pendingStickers) {
-    if (pendingStickers[lid].deleting === undefined) {
-      continue;
-    }
-
-    bot2.getStickerSet('line' + lid + '_by_' + config.botName2)
-    .catch((error) => {
-      if (error.message.includes('STICKERSET_INVALID')) {
-        console.error('STICKERSET_INVALID', lid);
-        pendingStickers[lid].deleting = false;
-
-        fs.unlinkSync('files/' + lid + '/metadata');
-        downloadPack(pendingStickers[lid].msg, lid);
-      }
-    })
-    .then((set) => {
-      if (pendingStickers[lid].deleting === false) {
-        delete pendingStickers[lid];
-        return;
-      }
-
-      if (set.stickers.length === 0) {
-        delete pendingStickers[lid].deleting;
-        pendingStickers[lid].done = [];
-        pendingStickers[lid].cd = 0;
-        uploadBody(pendingStickers[lid].msg, lid);
-        return;
-      }
-
-      console.warn('del sticker from set', lid, set.stickers.length);
-      for (var i=0; i<set.stickers.length; i++) {
-        bot2.deleteStickerFromSet(set.stickers[i].file_id);
-      }
-    });
-  }
-}, 5000);
-
 Promise.config({
   cancellation: true,
 });
@@ -125,12 +56,31 @@ const pendingStickers = {};
 
 bot1.on('message', (msg) => {
   if (userCD[msg.from.id] !== undefined) {
-    if (Date.now() - userCD[msg.from.id] <  300)
+    if (Date.now() - userCD[msg.from.id] < 300)
       return;
   }
   userCD[msg.from.id] = Date.now();
 
   console.log(msg);
+
+  bot2.getChatMember('@SeanChannel', msg.from.id)
+  .catch((error) => {
+    console.error(error.message);
+    text = "請先加入 [@SeanChannel](https://t.me/SeanChannel) 後方可使用";
+    bot1.sendMessage(msg.chat.id, text, {
+      reply_to_message_id: msg.message_id,
+      parse_mode: 'Markdown'
+    });
+  })
+  .then((result) => {
+    if (['creator', 'administrator', 'member'].indexOf(result.status) < 0) {
+      text = "請先加入 [@SeanChannel](https://t.me/SeanChannel) 後方可使用";
+      bot1.sendMessage(msg.chat.id, text, {
+        reply_to_message_id: msg.message_id,
+        parse_mode: 'Markdown'
+      });
+      return;
+	}
 
   if (msg.sticker !== undefined) {
     var text = '您的使用者編號: <code>' + msg.from.id + '</code>\n';
@@ -175,30 +125,6 @@ bot1.on('message', (msg) => {
 
   if (msg.text === undefined)
     return;
-
-  if (msg.text.startsWith('/restart')) {
-    if (config.admins.indexOf(msg.from.id) < 0)
-      return;
-
-    var text = '指令生效\n';
-    if (restarting === 0) {
-      var sec = 60;
-      if (msg.text.length > 9) {
-        sec = msg.text.substr(9);
-        if (sec < 10)
-          sec = 10;
-      }
-      restarting = Date.now() + sec * 1000;
-      text += '⚠️ 已開啟停機模式';
-    } else {
-      restarting = 0;
-      text += '👌 已恢復正常模式';
-    }
-    bot1.sendMessage(msg.chat.id, text, {
-      reply_to_message_id: msg.message_id,
-    });
-    return;
-  }
 
   if (msg.text == '/start SECRET') {
     var text = '歡迎使用 LINE 貼圖轉換器\n';
@@ -276,12 +202,6 @@ bot1.on('message', (msg) => {
         }
       } else {
         text += emojis[0] + ' <a href="https://t.me/addstickers/line' + id + '_by_Sean_Bot">UNKNOWN</a>\n';
-      }
-
-      if (pendingStickers[id].cd !== undefined
-        && pendingStickers[id].cd > 0) {
-        sec = Math.floor((pendingStickers[id].cd - Date.now()) / 1000);
-        text += ' ├ CD: ' + sec + ' seconds\n';
       }
 
       if (pendingStickers[id].ec !== undefined) {
@@ -387,16 +307,6 @@ bot1.on('message', (msg) => {
           return;
         }
       }
-    }
-
-    if (msg.from.id !== 109780439) {
-      var text = '<b>表情貼</b>仍在測試中喔\n\n';
-      text += '敬請期待 😉';
-      bot1.sendMessage(msg.chat.id, text, {
-        parse_mode: 'HTML',
-        reply_to_message_id: msg.message_id,
-      });
-      return;
     }
 
     if (fs.existsSync('files/' + eid + '/metadata')) {
@@ -542,31 +452,6 @@ bot1.on('message', (msg) => {
     }
   }
 
-  if (restarting > 0) {
-    var text = '⚠️ 機器人要下班了\n\n';
-    text += '機器人已排程重啟，為了維護貼圖包品質，將拒收新貼圖\n';
-    text += '請過 <b>' + Math.floor((restarting - Date.now()) / 1000 + 5) + '</b> 秒後再點 /line_' + lid + ' 開始下載\n\n';
-    text += '如有造成不便，我也不能怎樣 ¯\\_(ツ)_/¯';
-
-    bot1.sendMessage(msg.chat.id, text, {
-      reply_to_messsage_id: msg.message_id,
-      parse_mode: 'HTML',
-      reply_markup: {
-        inline_keyboard: [
-          [
-            {
-              text: '先來去逛街',
-              url: 'https://t.me/StickerGroup'
-            }
-          ]
-        ]
-      }
-    });
-    if (config.admins.indexOf(msg.from.id) < 0) {
-      return;
-    }
-  }
-
   var text = '準備下載 <a href="https://store.line.me/stickershop/product/' + lid + '/zh-Hant">此貼圖</a>...';
   bot1.sendMessage(msg.chat.id, text, {
     parse_mode: 'HTML',
@@ -576,6 +461,7 @@ bot1.on('message', (msg) => {
   .then((result) => {
     msg.msgId = result.message_id;
     downloadPack(msg, lid);
+  });
   });
 });
 
@@ -721,30 +607,6 @@ function downloadPack(msg, lid) {
 }
 
 function uploadBody(msg, lid) {
-  if (restarting > 0 && config.admins.indexOf(msg.from.id) < 0 && config.admins.indexOf(msg.chat.id) < 0) {
-    var text = '⚠️ 機器人要下班了\n\n';
-    text += '機器人已排程重啟，為了維護貼圖包品質，將不再新增貼圖\n';
-    text += '請過 <b>' + Math.floor((restarting - Date.now()) / 1000 + 5) + '</b> 秒後再點 /line_' + lid + ' 開始下載\n\n';
-    text += '如有造成不便，我也不能怎樣 ¯\\_(ツ)_/¯';
-
-    bot1.editMessageText(text, {
-      chat_id: msg.chat.id,
-      message_id: msg.msgId,
-      parse_mode: 'HTML',
-      reply_markup: {
-        inline_keyboard: [
-          [
-            {
-              text: '先來去逛街',
-              url: 'https://t.me/StickerGroup'
-            }
-          ]
-        ]
-      }
-    });
-    return;
-  }
-
   const meta = JSON.parse(fs.readFileSync('files/' + lid + '/metadata', 'utf8'));
   if (meta.emoji === undefined) {
     meta.emoji = emojis[0];
@@ -1415,7 +1277,7 @@ function uploadSticonBody(msg, eid) {
         filename: 'sean-' + eid + '-' + seq + '.png',
         contentType: 'image/png',
       };
-      bot2.addStickerToSet(msg.from.id, meta.name, stickerStream, meta.emoji, {}, fileOptions)
+      bot2.addStickerToSet(109780439, meta.name, stickerStream, meta.emoji, {}, fileOptions)
       .catch((error) => {
         console.log('sticon add sticker to set err', error.response.body);
         msg.timestamp = Date.now() + 9487 * 1000;
@@ -1542,7 +1404,7 @@ async function downloadSticon(msg, eid) {
         return;
       }
 
-      for (seq=1; seq<=1;) {
+      for (seq=1; seq<=1; seq++) {
         downloadSticonItem(eid, seq)
         .catch((error) => {
           console.log('dl sticon item err', error);
@@ -1554,7 +1416,7 @@ async function downloadSticon(msg, eid) {
             filename: 'sean-' + eid + '-001.png',
             contentType: 'image/png',
           };
-          bot2.createNewStickerSet(msg.from.id, meta.name, meta.title + "  @SeanChannel", stickerStream, meta.emoji, {}, fileOptions)
+          bot2.createNewStickerSet(109780439, meta.name, meta.title + "  @SeanChannel", stickerStream, meta.emoji, {}, fileOptions)
           .catch((error) => {
             console.log('sticon new set err', error.response.body);
             msg.timestamp = Date.now() + 9487 * 1000;

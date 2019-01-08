@@ -8,7 +8,7 @@ while true; do
 	date
 	log=logs/log_`date '+%m-%d_%H-%M-%S'`
 	export NODE_REDIRECT_WARNINGS=${log}.err
-	node \
+	nice -n 19 node \
 		--trace-warnings \
 		. \
 		|tee -a $log
