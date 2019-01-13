@@ -37,9 +37,6 @@ const langs = [
   'ko'
 ];
 
-const lineRegEx = /(?:line.me\/(?:S\/sticker|stickershop\/product)\/|line:.+?|Number=|\/(?:line|start)[_ ]*)(\d{3,})/;
-const sticonRegEx = /(?:line\.me\/(?:S\/emoji\/\?id=|emojishop\/product\/)|line:.+?|\/(?:line|start)[_ ]*)([0-9a-f]{24})/;
-
 Promise.config({
   cancellation: true,
 });
@@ -54,7 +51,7 @@ const bot2 = new TelegramBot(config.token2);
 const userCD = {};
 const pendingStickers = {};
 
-bot1.on('message', (msg) => {
+bot1.on('message', async (msg) => {
   if (userCD[msg.from.id] !== undefined) {
     if (Date.now() - userCD[msg.from.id] < 300)
       return;
@@ -63,16 +60,9 @@ bot1.on('message', (msg) => {
 
   console.log(msg);
 
-  bot2.getChatMember('@SeanChannel', msg.from.id)
-  .catch((error) => {
-    console.error(error.message);
-    text = "請先加入 [@SeanChannel](https://t.me/SeanChannel) 後方可使用";
-    bot1.sendMessage(msg.chat.id, text, {
-      reply_to_message_id: msg.message_id,
-      parse_mode: 'Markdown'
-    });
-  })
-  .then((result) => {
+  try {
+    const result = await bot2.getChatMember('@SeanChannel', msg.from.id);
+
     if (['creator', 'administrator', 'member'].indexOf(result.status) < 0) {
       text = "請先加入 [@SeanChannel](https://t.me/SeanChannel) 後方可使用";
       bot1.sendMessage(msg.chat.id, text, {
@@ -80,7 +70,15 @@ bot1.on('message', (msg) => {
         parse_mode: 'Markdown'
       });
       return;
-	}
+    }
+  } catch (error) {
+    console.error(error.message);
+    text = "請先加入 [@SeanChannel](https://t.me/SeanChannel) 後方可使用";
+    bot1.sendMessage(msg.chat.id, text, {
+      reply_to_message_id: msg.message_id,
+      parse_mode: 'Markdown'
+    });
+  }
 
   if (msg.sticker !== undefined) {
     var text = '您的使用者編號: <code>' + msg.from.id + '</code>\n';
@@ -92,62 +90,12 @@ bot1.on('message', (msg) => {
     bot1.sendMessage(msg.chat.id, text, {
       reply_to_message_id: msg.message_id,
       parse_mode: 'HTML'
-    })
-    .then((result) => {
-      msg.msgId = result.message_id
-      if (msg.sticker.set_name !== undefined) {
-        var found = msg.sticker.set_name.match(/^line(\d+)_by_Sean_Bot$/);
-        if (found) {
-          const lid = found[1];
-          checkPack(msg, lid)
-          .catch((text) => {
-            bot1.editMessageText(text, {
-              chat_id: msg.chat.id,
-              message_id: msg.msgId,
-              parse_mode: 'HTML',
-              reply_markup: {
-                inline_keyboard: [
-                  [
-                    {
-                      text: '🔔 好了通知我一聲',
-                      callback_data: 'notify_' + lid
-                    }
-                  ]
-                ]
-              }
-            });
-          });
-        }
-      }
     });
     return;
   }
 
   if (msg.text === undefined)
     return;
-
-  if (msg.text == '/start SECRET') {
-    var text = '歡迎使用 LINE 貼圖轉換器\n';
-    text += '您已啟動完成，直接分享貼圖連結過來，就會自動下載囉~\n\n';
-    text += '如有任何疑慮，歡迎至<a href="https://t.me/StickerGroup">貼圖群</a>詢問';
-
-    bot1.sendMessage(msg.chat.id, text, {
-      parse_mode: 'HTML',
-      reply_to_message_id: msg.message_id,
-      disable_web_page_preview: true,
-      reply_markup: {
-        inline_keyboard: [
-          [
-            {
-              text: '探索更多貼圖',
-              url: 'https://t.me/StickerGroup'
-            }
-          ]
-        ]
-      }
-    });
-    return;
-  }
 
   if (msg.text == '/start edit_emoji') {
     var text = '這邊有教學喔 :D\n';
@@ -196,20 +144,12 @@ bot1.on('message', (msg) => {
       if (fs.existsSync('files/' + id + '/metadata')) {
         meta = JSON.parse(fs.readFileSync('files/' + id + '/metadata', 'utf8'));
         text += meta.emoji + ' <a href="https://t.me/addstickers/' + meta.name + '">' + meta.title + '</a>\n';
-
-        if (meta.done !== undefined) {
-          text += ' ├ ' + prog(meta.done.length, meta.stickers.length);
-        }
       } else {
         text += emojis[0] + ' <a href="https://t.me/addstickers/line' + id + '_by_Sean_Bot">UNKNOWN</a>\n';
       }
 
       if (pendingStickers[id].ec !== undefined) {
         text += '   └ 錯誤次數: <b>' + pendingStickers[id].ec + '</b> 次\n';
-      }
-
-      if (pendingStickers[id].deleting !== undefined) {
-        text += ' ├ Deleting\n';
       }
 
       text += ' └ /line_' + id + '\n\n';
@@ -225,14 +165,61 @@ bot1.on('message', (msg) => {
     return;
   }
 
-  var found1 = msg.text.match(lineRegEx);
-  var found2 = msg.text.match(sticonRegEx);
+  if (msg.text.match(/\/delete ([0-9]+)/)) {
+    if ([
+      109780439 // Sean
+    ].indexOf(msg.from.id) == -1) {
+      bot1.sendMessage(msg.chat.id, '*401 Unauthorized*', {
+        parse_mode: 'Markdown',
+        reply_to_message_id: msg.message_id
+      });
+      return;
+    }
 
-  if (!found1 && !found2) {
+    const result = await bot1.sendMessage(msg.chat.id, '準備重新下載貼圖包', {
+      reply_to_message_id: msg.message_id
+    });
+    msg.msgId = result.message_id;
+
+    const lid = msg.text.match(/[0-9]+/)[0];
+    try {
+      const set = await bot2.getStickerSet('line' + lid + '_by_' + config.botName2);
+
+      if (set.stickers.length === 0) {
+        downloadPack(msg, lid);
+        return;
+      }
+
+      console.warn('del sticker from set', lid, set.stickers.length);
+      for (var i=0; i<set.stickers.length; i++) {
+        await bot2.deleteStickerFromSet(set.stickers[i].file_id);
+      }
+
+      downloadPack(msg, lid);
+    } catch (error) {
+      if (error.message.includes('STICKERSET_INVALID')) {
+        console.error('STICKERSET_INVALID', lid);
+        try {
+          fs.unlinkSync('files/' + lid + '/metadata');
+        } catch (err) {
+          console.log("delete unlink metadata", err);
+        }
+
+        downloadPack(msg, lid);
+      } else
+        console.error(error);
+    }
+
+    return;
+  }
+
+  var found = msg.text.match(/^\/start ([A-Za-z0-9+\/=]+)$/);
+
+  if (!found) {
     if (msg.chat.id < 0)
       return;
+
     var text = '歡迎使用 LINE 貼圖轉換器\n';
-    text += '使用前，請先確定已啟動完成\n';
     text += '更多訊息請點<a href="https://t.me/Sean_LINE_bot?start=about">這裡</a>\n\n';
     text += '\nℹ️ 本機器人由 <a href="https://t.me/SeanChannel">Sean</a> 提供';
 
@@ -244,8 +231,8 @@ bot1.on('message', (msg) => {
         inline_keyboard: [
           [
             {
-              text: '點我啟動',
-              url: 'https://t.me/' + config.botName2 + '?start=sticker_dl_start_' + msg.from.id
+              text: '回到主機器人',
+              url: 'https://t.me/Sean_LINE_bot?start=back'
             }
           ]
         ]
@@ -273,210 +260,92 @@ bot1.on('message', (msg) => {
     return;
   }
 
-  if (found2) {
-    const eid = found2[1];
-    console.log('found eid', eid);
+  const lid = Buffer.from(found[1], 'base64').toString();
 
-    if (fs.existsSync('files/' + eid + '/metadata')) {
-      const meta = JSON.parse(fs.readFileSync('files/' + eid + '/metadata', 'utf8'));
-      if (meta.done !== undefined) {
-        if (meta.done.length == 40) {
-          text = '<a href="https://t.me/addstickers/' + meta.name + '">' + enHTML(meta.title) + '</a> 已存在';
-          bot1.sendMessage(msg.chat.id, text, {
-            message_id: msg.msgId,
-            parse_mode: 'HTML',
-            reply_markup: {
-              inline_keyboard: [
-                [
-                  {
-                    text: '點我安裝',
-                    url: 'https://t.me/addstickers/' + meta.name
-                  }
-                ],
-                [
-                  {
-                    text: '分享給朋友',
-                    url: 'https://t.me/share/url'
-                    + '?url=' + encodeURIComponent('https://t.me/addstickers/' + meta.name)
-                    + '&text=' + encodeURIComponent(meta.title + '\n\n一起用 @' + config.botName1 + ' 把貼圖搬運來吧~')
-                  }
-                ]
-              ]
-            }
-          });
-          return;
-        }
-      }
-    }
+  if (lid.match(/[0-9a-f]{24}/)) {
+    if (fs.existsSync('files/' + lid + '/metadata')) {
+      const meta = JSON.parse(fs.readFileSync('files/' + lid + '/metadata', 'utf8'));
 
-    if (fs.existsSync('files/' + eid + '/metadata')) {
-      const meta = JSON.parse(fs.readFileSync('files/' + eid + '/metadata', 'utf8'));
-      var text = '路邊撿到半包貼圖，接續上傳 💪\n';
-      if (meta.done.length > 0) {
-        text += prog(meta.done.length, 40);
-        if (meta.done.length >= 30) {
-          text += '預覽連結: <a href="https://t.me/addstickers/' + meta.name + '">' + enHTML(meta.title) + '</a>\n';
-        }
-      }
+      text = '<a href="https://t.me/addstickers/' + meta.name + '">' + enHTML(meta.title) + '</a> 已存在';
       bot1.sendMessage(msg.chat.id, text, {
+        message_id: msg.msgId,
         parse_mode: 'HTML',
-        reply_to_message_id: msg.message_id,
-      })
-      .then((result) => {
-        msg.msgId = result.message_id;
-        uploadSticonBody(msg, eid);
+        reply_markup: {
+          inline_keyboard: [
+            [
+              {
+                text: '點我安裝',
+                url: 'https://t.me/addstickers/' + meta.name
+              }
+            ]
+          ]
+        }
       });
       return;
     }
 
-    var text = '準備下載表情貼';
-    bot1.sendMessage(msg.chat.id, text, {
+
+    const result = await bot1.sendMessage(msg.chat.id, '準備下載表情貼', {
       parse_mode: 'HTML',
       reply_to_message_id: msg.message_id,
-    })
-    .then((result) => {
-      msg.msgId = result.message_id;
-      downloadSticon(msg, eid)
-      .catch((error) => {
-        console.error('dl sticon', error);
-        msg.timestamp = Date.now() + 9487 * 1000;
-        bot1.editMessageText(error, {
-          chat_id: msg.chat.id,
-          message_id: msg.msgId,
-          parse_mode: 'HTML'
-        });
+    });
+
+    msg.msgId = result.message_id;
+    downloadSticon(msg, lid)
+    .catch((error) => {
+      console.error('dl sticon', error);
+      bot1.editMessageText(error, {
+        chat_id: msg.chat.id,
+        message_id: msg.msgId,
+        parse_mode: 'HTML'
       });
-      return;
     });
 
     return;
-  }
+  } else if (lid.match(/^\d{3,}/)) {
+    if (!fs.existsSync('files/' + lid)) {
+      fs.mkdirSync('files/' + lid);
+    }
+    if (fs.existsSync('files/' + lid + '/metadata')) {
+      const meta = JSON.parse(fs.readFileSync('files/' + lid + '/metadata', 'utf8'));
 
-  const lid = found1[1];
-
-  if (!fs.existsSync('files/' + lid)) {
-    fs.mkdirSync('files/' + lid);
-  }
-  if (fs.existsSync('files/' + lid + '/metadata')) {
-    const meta = JSON.parse(fs.readFileSync('files/' + lid + '/metadata', 'utf8'));
-    meta.error = [];
-
-    if (meta.done !== undefined) {
-      if (meta.done.length == meta.stickers.length) {
-        text = '<a href="https://t.me/addstickers/' + meta.name + '">' + enHTML(meta.title) + '</a> 已存在';
-        bot1.sendMessage(msg.chat.id, text, {
-          message_id: msg.msgId,
-          parse_mode: 'HTML',
-          reply_markup: {
-            inline_keyboard: [
-              [
-                {
-                  text: '點我安裝',
-                  url: 'https://t.me/addstickers/' + meta.name
-                }
-              ],
-              [
-                {
-                  text: '分享給朋友',
-                  url: 'https://t.me/share/url'
-                  + '?url=' + encodeURIComponent('https://t.me/addstickers/' + meta.name)
-                  + '&text=' + encodeURIComponent(meta.title + '\n\n一起用 @' + config.botName1 + ' 把貼圖搬運來吧~')
-                }
-              ]
-            ]
-          }
-        })
-        .then((result) => {
-          msg.msgId = result.message_id;
-          checkPack(msg, lid)
-          .catch((text) => {
-            bot1.editMessageText(text, {
-              chat_id: msg.chat.id,
-              message_id: msg.msgId,
-              parse_mode: 'HTML',
-              reply_markup: {
-                inline_keyboard: [
-                  [
-                    {
-                      text: '🔔 好了通知我一聲',
-                      callback_data: 'notify_' + lid
-                    }
-                  ]
-                ]
-              }
-            });
-          });
-        });
-        return;
-      }
-
-      if (pendingStickers[lid] !== undefined) {
-        var text = '已中斷下載\n'
-        text += '原因: 他人正在下載同款貼圖包\n';
-        if (meta.done != undefined) {
-          text += prog(meta.done.length, meta.stickers.length);
-        }
-        bot1.sendMessage(msg.chat.id, text, {
-          parse_mode: 'HTML',
-          reply_to_message_id: msg.message_id,
-          reply_markup: {
-            inline_keyboard: [
-              [
-                {
-                  text: '🔔 好了通知我一聲',
-                  callback_data: 'notify_' + lid
-                }
-              ]
-            ]
-          }
-        });
-        return;
-      }
-
-      var text = '路邊撿到半包貼圖，接續上傳 💪\n';
-      if (meta.done.length > 0) {
-        text += prog(meta.done.length, meta.stickers.length);
-        if (meta.done.length / meta.stickers.length >= 0.7) {
-          text += '預覽連結: <a href="https://t.me/addstickers/' + meta.name + '">' + enHTML(meta.title) + '</a>\n';
-        }
-      }
+      text = '<a href="https://t.me/addstickers/' + meta.name + '">' + enHTML(meta.title) + '</a> 已存在';
       bot1.sendMessage(msg.chat.id, text, {
+        message_id: msg.msgId,
         parse_mode: 'HTML',
-        reply_to_message_id: msg.message_id,
-      })
-      .then((result) => {
-        msg.msgId = result.message_id;
-        uploadBody(msg, lid);
+        reply_markup: {
+          inline_keyboard: [
+            [
+              {
+                text: '點我安裝',
+                url: 'https://t.me/addstickers/' + meta.name
+              }
+            ]
+          ]
+        }
       });
       return;
     }
-  }
 
-  var text = '準備下載 <a href="https://store.line.me/stickershop/product/' + lid + '/zh-Hant">此貼圖</a>...';
-  bot1.sendMessage(msg.chat.id, text, {
-    parse_mode: 'HTML',
-    reply_to_message_id: msg.message_id,
-    disable_web_page_preview: true
-  })
-  .then((result) => {
-    msg.msgId = result.message_id;
-    downloadPack(msg, lid);
-  });
-  });
+    var text = '準備下載 <a href="https://store.line.me/stickershop/product/' + lid + '/zh-Hant">此貼圖</a>...';
+    bot1.sendMessage(msg.chat.id, text, {
+      parse_mode: 'HTML',
+      reply_to_message_id: msg.message_id,
+      disable_web_page_preview: true
+    })
+    .then((result) => {
+      msg.msgId = result.message_id;
+      downloadPack(msg, lid);
+    });
+  }
 });
 
-function downloadPack(msg, lid) {
+async function downloadPack(msg, lid) {
   console.log('downloadPack', lid);
-  downloadZip(lid)
-  .catch((error) => {
-    msg.timestamp = Date.now() + 9487 * 1000;
-    bot1.editMessageText(error, {
-      chat_id: msg.chat.id,
-      message_id: msg.msgId,
-      parse_mode: 'HTML'
-    });
-  })
-  .then((dir) => {
+
+  try {
+    const dir = await downloadZip(lid);
+
     fs.appendFile(dir + '/download-pack-' + Date.now(), JSON.stringify(msg), (error) => { console.error(error) });
     console.log('downloadPack unzip', dir);
 
@@ -495,18 +364,10 @@ function downloadPack(msg, lid) {
     });
 
     const sid = meta.stickers[0].id;
-    console.log('downloadPack ready to resize Png', lid, sid);
-    resizePng(dir, sid)
-    .catch((error) => {
-      msg.timestamp = Date.now() + 9487 * 1000;
-      bot1.editMessageText(error, {
-        chat_id: msg.chat.id,
-        message_id: msg.msgId,
-        parse_mode: 'HTML'
-      });
-      pendingStickers[lid].cd = Date.now() + 60 * 1000;   // Retry after 1 min
-    })
-    .then((sticker) => {
+
+    try {
+      const sticker = await resizePng(dir, sid);
+
       console.log('downloadPack resized', sticker);
       if (msg.timestamp > Date.now())
         return;
@@ -516,11 +377,19 @@ function downloadPack(msg, lid) {
         filename: 'sean-' + sid + '.png',
         contentType: 'image/png',
       };
-      bot2.createNewStickerSet(msg.from.id, meta.name, meta.title + "  @SeanChannel", stickerStream, meta.emoji, {}, fileOptions)
-      .catch((error) => {
-        msg.timestamp = Date.now() + 9487 * 1000;
-        meta.error.push(sid);
 
+      try {
+        const result = await bot2.createNewStickerSet(msg.from.id, meta.name, meta.title + "  @SeanChannel", stickerStream, meta.emoji, {}, fileOptions);
+
+        fs.writeFileSync(dir + '/metadata', JSON.stringify(meta));
+        var text = '建立 <a href="https://store.line.me/stickershop/product/' + lid + '/' + meta['lang'] + '">' + enHTML(meta.title) + '</a> 中...\n';
+        bot1.editMessageText(text, {
+          chat_id: msg.chat.id,
+          message_id: msg.msgId,
+          parse_mode: 'HTML'
+        });
+        uploadBody(msg, lid);
+      } catch (error) {
         if (error.message.includes('user not found') || error.message.includes('bot was blocked by the user')) {
           var text = '請確定 <a href="https://t.me/' + config.botName2 + '">已於此啟動過機器人</a>\n';
           bot1.editMessageText(text, {
@@ -543,13 +412,7 @@ function downloadPack(msg, lid) {
             disable_web_page_preview: true,
             parse_mode: 'HTML'
           });
-          uploadBody(msg, lid);
-          return;
-        }
-
-        if (error.message.includes('created sticker set not found')) {
-          console.error('created sticker set not found', lid);
-          delete pendingStickers[lid];
+          uploadBody(msg, lid, 1);
           return;
         }
 
@@ -564,54 +427,28 @@ function downloadPack(msg, lid) {
           disable_web_page_preview: true,
           parse_mode: 'HTML'
         });
-
-        checkPack(msg, lid)
-        .catch((text) => {
-          console.log('downloadPack checkPack error', lid, text);
-          bot1.editMessageText(text, {
-            chat_id: msg.chat.id,
-            message_id: msg.msgId,
-            parse_mode: 'HTML',
-            reply_markup: {
-              inline_keyboard: [
-                [
-                  {
-                    text: '🔔 好了通知我一聲',
-                    callback_data: 'notify_' + lid
-                  }
-                ]
-              ]
-            }
-          });
-        });
-      })
-      .then((result) => {
-        if (msg.timestamp > Date.now())
-          return;
-
-        if (meta.error.indexOf(sid) < 0) {
-          meta.done = [ sid ];
-          fs.writeFileSync(dir + '/metadata', JSON.stringify(meta));
-          var text = '建立 <a href="https://store.line.me/stickershop/product/' + lid + '/' + meta['lang'] + '">' + enHTML(meta.title) + '</a> 中...\n';
-          text += prog(meta.done.length, meta.stickers.length);
-          bot1.editMessageText(text, {
-            chat_id: msg.chat.id,
-            message_id: msg.msgId,
-            parse_mode: 'HTML'
-          });
-          uploadBody(msg, lid);
-        }
+      }
+    } catch (error) {
+      bot1.editMessageText(error, {
+        chat_id: msg.chat.id,
+        message_id: msg.msgId,
+        parse_mode: 'HTML'
       });
+    }
+  } catch (error) {
+    bot1.editMessageText(error, {
+      chat_id: msg.chat.id,
+      message_id: msg.msgId,
+      parse_mode: 'HTML'
     });
-  });
+  }
 }
 
-function uploadBody(msg, lid) {
+async function uploadBody(msg, lid, seq = 2) {
   const meta = JSON.parse(fs.readFileSync('files/' + lid + '/metadata', 'utf8'));
   if (meta.emoji === undefined) {
     meta.emoji = emojis[0];
   }
-  meta.error = [];
 
   if (pendingStickers[lid] === undefined) {
     pendingStickers[lid] = {
@@ -624,138 +461,23 @@ function uploadBody(msg, lid) {
     msg.timestamp = Date.now();
   }
 
-  if (meta.done === undefined) {
-    checkPack(msg, lid)
-    .catch((err) => {
-      bot1.editMessageText(err, {
-        chat_id: msg.chat.id,
-        message_id: msg.msgId,
-        parse_mode: 'HTML',
-      });
-    });
-    return;
-  }
+  const dir = 'files/' + lid;
+  for (; seq <= meta.stickers.length; seq++) {
+    try {
+      const sid = meta.stickers[seq-1].id;
+      const sticker = await resizePng(dir, sid);
 
-
-  if (pendingStickers[lid].counter === undefined) {
-    pendingStickers[lid].counter = 0;
-  }
-  pendingStickers[lid].counter++;
-  if (pendingStickers[lid].counter > 3) {   // Tried more than 5 times
-    console.log('delete pending sticker for tried 5 times', lid, pendingStickers[lid]);
-    delete pendingStickers[lid];
-    return;
-  }
-
-  console.log('uploadBody ready for', lid, meta.stickers.length);
-  for (let i = 0; i < meta.stickers.length; i++) {
-    if (Date.now() < msg.timestamp)   // Previous stickers
-      return;
-
-    const sid = meta.stickers[i].id;
-    if (meta.done.indexOf(sid) > -1)
-      continue;
-
-    const dir = 'files/' + lid;
-
-    resizePng(dir, sid)
-    .catch((error) => {
-      console.log('uploadBody resizePng err', error);
-      msg.timestamp = Date.now() + 9487 * 1000;
-      bot1.editMessageText(error, {
-        chat_id: msg.chat.id,
-        message_id: msg.msgId,
-        parse_mode: 'HTML'
-      });
-      pendingStickers[lid].cd = Date.now() + 60 * 1000;   // Retry after 1 min
-    })
-    .then((sticker) => {
-      if (Date.now() < msg.timestamp)
-        return;
       const stickerStream = fs.createReadStream(sticker);
       const fileOptions = {
         filename: 'sean-' + sid + '.png',
         contentType: 'image/png',
       };
-      bot2.addStickerToSet(msg.from.id, meta.name, stickerStream, meta.emoji, {}, fileOptions)
-      .catch((error) => {
-        console.log('uploadBody addStickerToSet err', lid, sid, error.message);
-        meta.error.push(sid);
-        if (Date.now() < msg.timestamp)
-          return;
-        msg.timestamp = Date.now() + 9487 * 1000;
-        pendingStickers[lid].cd = Date.now() + 60 * 1000;   // Retry after 1 min
 
-        var opt = {
-          chat_id: msg.chat.id,
-          message_id: msg.msgId,
-          parse_mode: 'HTML'
-        };
+      try {
+        const result = await bot2.addStickerToSet(msg.from.id, meta.name, stickerStream, meta.emoji, {}, fileOptions);
+        console.log('uploadBody addStickerToSet', lid, seq);
 
-        console.log('uploadBody addStickerToSet error msg', error.message);
-        if (error.message.includes('user not found') || error.message.includes('bot was blocked by the user')) {
-          text = '請確定 <a href="https://t.me/' + config.botName2 + '">已於此啟動過機器人</a>\n';
-          text += '點擊 /line_' + lid + ' 重試\n';
-          bot1.editMessageText(text, opt);
-        } else if (error.message.includes('retry after')) {
-          text = '上傳速度太快啦，TG 伺服器要冷卻一下\n';
-          text += '將會自動重試\n';
-          text += prog(meta.done.length, meta.stickers.length);
-          text += '貼圖包連結: <a href="https://t.me/addstickers/' + meta.name + '">' + enHTML(meta.title) + '</a>\n';
-          sec = error.message.substr(46) + 3;
-          pendingStickers[lid].cd = Date.now() + sec * 1000;
-          opt['reply_markup'] = {
-            inline_keyboard: [
-              [
-                {
-                  text: '🔔 好了通知我一聲',
-                  callback_data: 'notify_' + lid
-                }
-              ]
-            ]
-          };
-
-          text += '\n詳細報告: addStickerToSet\n';
-          text += '<pre>' + enHTML(JSON.stringify(error)) + '</pre>';
-          bot1.editMessageText(text, opt);
-        } else if (error.message.includes('STICKERS_TOO_MUCH')) {
-          text = '貼圖數量衝破天際啦~\n';
-          text += '貼圖包連結: <a href="https://t.me/addstickers/' + meta.name + '">' + enHTML(meta.title) + '</a>\n';
-          text += '\n詳細報告: addStickerToSet\n';
-          text += '<pre>' + enHTML(JSON.stringify(error)) + '</pre>';
-          bot1.editMessageText(text, opt);
-
-          pendingStickers[lid].deleting = true;
-        } else if (error.message.includes('STICKERSET_INVALID')) {
-          console.log('uploadBody invalid set', lid);
-
-          text = '貼圖包疑似被刪除了\n';
-          text += '貼圖包連結: <a href="https://t.me/addstickers/' + meta.name + '">' + enHTML(meta.title) + '</a>\n';
-          text += '\n詳細報告: addStickerToSet\n';
-          text += '<pre>' + enHTML(JSON.stringify(error)) + '</pre>';
-          bot1.editMessageText(text, opt);
-
-          msg.timestamp = Date.now();   // Reset error state
-          downloadPack(msg, lid);
-        } else {
-          text = '發生錯誤，已中斷下載\n';
-          text += '編號: <code>' + lid + '</code> \n';
-          text += '\n詳細報告: addStickerToSet\n';
-          text += '<pre>' + enHTML(JSON.stringify(error)) + '</pre>';
-          bot1.editMessageText(text, opt);
-          pendingStickers[lid].cd = Date.now() + 60 * 1000;   // Retry after 1 min
-        }
-      })
-      .then((result) => {
-        if (meta.error.indexOf(sid) > -1)
-          return;
-
-        meta.done.push(sid);
-
-        if (Date.now() < msg.timestamp)
-          return;
-
-        if (meta.done.length == meta.stickers.length) {
+        if (seq == meta.stickers.length) {
           var text = '上傳完成!\n';
           text += '共 <b>' + meta.stickers.length + '</b> 張貼圖\n';
           text += '安裝連結: <a href="https://t.me/addstickers/' + meta.name + '">' + enHTML(meta.title) + '</a>\n';
@@ -790,132 +512,91 @@ function uploadBody(msg, lid) {
             }
           });
 
-          if (Array.isArray(pendingStickers[lid].users)) {
-            for (var i=0; i<pendingStickers[lid].users.length; i++) {
-              var text = '您訂閱的 <a href="https://t.me/addstickers/' + meta.name + '">' + enHTML(meta.title) + '</a> 上傳完成囉 😃\n';
-              text += '共 <b>' + meta.stickers.length + '</b> 張貼圖，快來試用看看吧！\n';
-              bot1.sendMessage(pendingStickers[lid].users[i], text, {
-                parse_mode: 'HTML',
-                reply_markup: {
-                  inline_keyboard: [
-                    [
-                      {
-                        text: '點我安裝',
-                        url: 'https://t.me/addstickers/' + meta.name
-                      }
-                    ],
-                    [
-                      {
-                        text: '分享給朋友',
-                        url: 'https://t.me/share/url'
-                        + '?url=' + encodeURIComponent('https://t.me/addstickers/' + meta.name)
-                        + '&text=' + encodeURIComponent(meta.title + '\n新出爐的呦~')
-                      }
-                    ]
-                  ]
-                }
-              });
-            }
-          }
-
           delete pendingStickers[lid];
+          meta.okay = true;
+          fs.writeFileSync('files/' + lid + '/metadata', JSON.stringify(meta), (error) => { if (error) console.error(error) });
         } else if (Date.now() - msg.timestamp > 300) {
           msg.timestamp = Date.now();
           var text = '上傳 <a href="https://store.line.me/stickershop/product/' + lid + '/' + meta['lang'] + '">' + enHTML(meta.title) + '</a> 中...\n';
-          text += prog(meta.done.length, meta.stickers.length);
-          if (meta.done.length / meta.stickers.length >= 0.7) {
+          text += prog(seq, meta.stickers.length);
+          if (seq / meta.stickers.length >= 0.7) {
             text += '預覽連結: <a href="https://t.me/addstickers/' + meta.name + '">' + enHTML(meta.title) + '</a>\n';
           }
           bot1.editMessageText(text, {
             chat_id: msg.chat.id,
             message_id: msg.msgId,
-            parse_mode: 'HTML',
-            reply_markup: {
-              inline_keyboard: [
-                [
-                  {
-                    text: '🔔 好了通知我一聲',
-                    callback_data: 'notify_' + lid
-                  }
-                ]
-              ]
-            }
+            parse_mode: 'HTML'
           });
         }
-      })
-      .finally(() => {
-        fs.writeFileSync('files/' + lid + '/metadata', JSON.stringify(meta), (error) => { if (error) console.error(error) });
+      } catch(error) {
+        console.log('uploadBody addStickerToSet err', lid, sid, error.message);
 
-        if (meta.done.length == meta.stickers.length) {
-          checkPack(msg, lid)
-          .catch((text) => {
-            bot1.editMessageText(text, {
-              chat_id: msg.chat.id,
-              message_id: msg.msgId,
-              parse_mode: 'HTML',
-              reply_markup: {
-                inline_keyboard: [
-                  [
-                    {
-                      text: '🔔 好了通知我一聲',
-                      callback_data: 'notify_' + lid
-                    }
-                  ]
-                ]
-              }
-            });
-          });
+        var opt = {
+          chat_id: msg.chat.id,
+          message_id: msg.msgId,
+          parse_mode: 'HTML'
+        };
+
+        console.log('uploadBody addStickerToSet error msg', error.message);
+        if (error.message.includes('user not found') || error.message.includes('bot was blocked by the user')) {
+          text = '請確定 <a href="https://t.me/' + config.botName2 + '">已於此啟動過機器人</a>\n';
+          text += '點擊 /line_' + lid + ' 重試\n';
+          bot1.editMessageText(text, opt);
+        } else if (error.message.includes('retry after')) {
+          text = '上傳速度太快啦，TG 伺服器要冷卻一下\n';
+          text += '將會自動重試\n';
+          text += prog(seq, meta.stickers.length);
+          text += '貼圖包連結: <a href="https://t.me/addstickers/' + meta.name + '">' + enHTML(meta.title) + '</a>\n';
+          sec = error.message.substr(46) + 3;
+
+          text += '\n詳細報告: addStickerToSet\n';
+          text += '<pre>' + enHTML(JSON.stringify(error)) + '</pre>';
+          bot1.editMessageText(text, opt);
+        } else if (error.message.includes('STICKERS_TOO_MUCH')) {
+          text = '貼圖數量衝破天際啦~\n';
+          text += '貼圖包連結: <a href="https://t.me/addstickers/' + meta.name + '">' + enHTML(meta.title) + '</a>\n';
+          text += '\n詳細報告: addStickerToSet\n';
+          text += '<pre>' + enHTML(JSON.stringify(error)) + '</pre>';
+          bot1.editMessageText(text, opt);
+        } else if (error.message.includes('STICKERSET_INVALID')) {
+          console.log('uploadBody invalid set', lid);
+
+          text = '貼圖包疑似被刪除了\n';
+          text += '貼圖包連結: <a href="https://t.me/addstickers/' + meta.name + '">' + enHTML(meta.title) + '</a>\n';
+          text += '\n詳細報告: addStickerToSet\n';
+          text += '<pre>' + enHTML(JSON.stringify(error)) + '</pre>';
+          bot1.editMessageText(text, opt);
+
+          downloadPack(msg, lid);
+        } else {
+          text = '發生錯誤，已中斷下載\n';
+          text += '編號: <code>' + lid + '</code> \n';
+          text += '\n詳細報告: addStickerToSet\n';
+          text += '<pre>' + enHTML(JSON.stringify(error)) + '</pre>';
+          bot1.editMessageText(text, opt);
         }
+
+        return;
+      } // addStickerToSet
+    } catch(error) {
+      console.log('uploadBody resizePng err', error);
+      bot1.editMessageText(error, {
+        chat_id: msg.chat.id,
+        message_id: msg.msgId,
+        parse_mode: 'HTML'
       });
-    });
-  }
+
+      return;
+    } // resizePng
+  } // for
 }
 
 
 bot1.on('callback_query', (query) => {
-  if (userCD[query.from.id] !== undefined) {
-    if (Date.now() - userCD[query.from.id] <  300)
-      return;
-  }
+  if (userCD[query.from.id] !== undefined
+    && Date.now() - userCD[query.from.id] < 300)
+    return;
   userCD[query.from.id] = Date.now();
-
-  if (query.data.startsWith('remove_')) {
-    lid = query.data.substr(7);
-    const dir = 'files/' + lid;
-
-    if (query.timestamp > Date.now())
-      return;
-
-    query.message.msgId = query.message.message_id;
-    checkPack(msg, lid)
-    .catch((text) => {
-      bot1.answerCallbackQuery(query.id, {
-        text: '已排入處理佇列'
-      });
-
-      bot1.editMessageText(text, {
-        chat_id: query.message.chat.id,
-        message_id: query.message.message_id,
-        parse_mode: 'HTML',
-        reply_markup: {
-          inline_keyboard: [
-            [
-              {
-                text: '🔔 好了通知我一聲',
-                callback_data: 'notify_' + lid
-              }
-            ]
-          ]
-        }
-      });
-    })
-    .then((text) => {
-      bot1.answerCallbackQuery(query.id, {
-        text: '看起來沒問題呀\n如真的怪怪的，請至群組提出',
-        show_alert: 'true'
-      });
-    });
-  }
 
   if (query.data.startsWith('edit_emoji_')) {
     var text = '點這邊看<a href="http://telegra.ph/Sticker-emoji-06-03">表符修改教學</a>\n\n';
@@ -930,29 +611,6 @@ bot1.on('callback_query', (query) => {
     bot1.answerCallbackQuery(query.id, {
       text: '您的貼圖編號: ' + query.data.substr(11)
     });
-  }
-
-  if (query.data.startsWith('notify_')) {
-    const lid = query.data.substr(7);
-    const uid = query.from.id;
-    var text;
-    if (pendingStickers[lid] === undefined) {
-      text = '這款貼圖不在佇列中欸';
-    } else {
-      if (pendingStickers[lid].users === undefined) {
-        pendingStickers[lid].users = [];
-      }
-      if (pendingStickers[lid].users.indexOf(uid) < 0) {
-        pendingStickers[lid].users.push(uid);
-        text = '訂閱完成！\n';
-      } else {
-        text = '您已經訂閱過了喔！\n';
-      }
-      text += '將會在完成時通知您 😊';
-    }
-    bot1.answerCallbackQuery(query.id, {
-      text: text
-    }).catch((error)=>{console.error("XXXXX", error.code, error.response.body);});;
   }
 });
 
@@ -1013,8 +671,6 @@ async function downloadZip(lid) {
         }
 
         const meta = JSON.parse(fs.readFileSync(dir + '/metadata', 'utf8'));
-        meta.error = [];
-        meta.done = [];
 
         meta.name = 'line' + lid + '_by_' + config.botName2;
         meta.emoji = emojis[Math.floor(Math.random() * emojis.length)];
@@ -1069,7 +725,7 @@ async function resizePng(dir, name, q = 100) {
       size = 8 * q;
     }
 
-    var error = false;
+    var errorF = false;
 
     sharp(origin)
     .toFormat(format, {
@@ -1078,20 +734,22 @@ async function resizePng(dir, name, q = 100) {
     .resize(size, size)
     .max()
     .toFile(tmpFile)
-    .catch((error) => {
-      console.error('sharp err 1', dir, name, origin, error);
-      error = true;
-      pendingStickers[lid].cd = Date.now() + 60 * 1000;   // Retry after 1 min
+    .catch((err) => {
+      console.error('sharp err 1', dir, name, origin, err);
+      errorF = true;
 
       var text = '發生錯誤，已中斷下載\n';
       text += '問題來源: NodeJS <b>sharp</b> (圖片轉檔工具)\n';
       text += '編號: <code>' + dir + '</code>, <code>' + name + '</code> \n';
       text += '詳細報告: resize webp\n';
-      text += '<pre>' + enHTML(error.message) + '</pre>';
+      if (err.message != undefined)
+        text += '<pre>' + enHTML(err.message) + '</pre>';
+      else
+        text += '<pre>' + enHTML(err) + '</pre>';
       return reject(text);
     })
     .then((result) => {
-      if (error) {
+      if (errorF) {
         console.error('resizePng', 'error = true', 'stage 1', result);
         return;
       }
@@ -1101,20 +759,8 @@ async function resizePng(dir, name, q = 100) {
       .max()
       .png()
       .toFile(sticker)
-      .catch((error) => {
-        console.error('sharp err 2', dir, name, origin, tmpFile, error);
-        error = true;
-        pendingStickers[lid].cd = Date.now() + 60 * 1000;   // Retry after 1 min
-
-        var text = '發生錯誤，已中斷下載\n';
-        text += '問題來源: NodeJS <b>sharp</b> (圖片轉檔工具)\n';
-        text += '編號: <code>' + dir + '</code>, <code>' + name + '</code> \n';
-        text += '詳細報告: convert png\n';
-        text += '<pre>' + enHTML(error.message) + '</pre>';
-        return reject(text);
-      })
       .then((result) => {
-        if (error) {
+        if (errorF) {
           console.error('resizePng', 'error = true', 'stage 2', result);
           return;
         }
@@ -1125,73 +771,31 @@ async function resizePng(dir, name, q = 100) {
         }
         resizePng(dir, name, Math.floor(q*0.8))
         .catch((err) => {
-          error = true;
-          pendingStickers[lid].cd = Date.now() + 60 * 1000;   // Retry after 1 min
+          errorF = true;
 
           return reject(err + '.');
         })
         .then((sticker) => {
-          if (error) {
+          if (errorF) {
             console.error('resizePng', 'error = true', 'stage 3', result);
             return;
           }
 
           return resolve(sticker);
         });
+      })
+      .catch((err) => {
+        console.error('sharp err 2', dir, name, origin, tmpFile, err);
+        errorF = true;
+
+        var text = '發生錯誤，已中斷下載\n';
+        text += '問題來源: NodeJS <b>sharp</b> (圖片轉檔工具)\n';
+        text += '編號: <code>' + dir + '</code>, <code>' + name + '</code> \n';
+        text += '詳細報告: convert png\n';
+        text += '<pre>' + enHTML(err.message) + '</pre>';
+        return reject(text);
       });
     })
-  });
-}
-
-async function checkPack(msg, lid) {
-  return new Promise(function(resolve, reject) {
-    // resolve: Pack currect
-    // reject:  Re-download
-    if (!fs.existsSync('files/' + lid + '/metadata')) {
-      return resolve('沒錯誤，但 metadata 消失了');
-    }
-
-    const meta = JSON.parse(fs.readFileSync('files/' + lid + '/metadata', 'utf8'));
-
-    bot2.getStickerSet('line' + lid + '_by_' + config.botName2)
-    .catch((err) => {
-      downloadZip(lid)
-      .catch((err) => {
-        return reject(err);
-      })
-      .then(() => {
-        pendingStickers[lid] = {
-          msg: msg,
-          deleting: true
-        };
-
-        return reject('貼圖包已失效\n已排入佇列，將自動修復');
-      });
-    })
-    .then((set) => {
-      if (pendingStickers[lid] !== undefined) {
-        return resolve('看起來有人正在下載呢');
-      }
-
-      if (meta.done !== undefined
-        && (meta.stickers.length !== meta.done.length   // We didn't upload all stickers
-        ||  meta.stickers.length === set.stickers.length)) {   // or Count is equal, we can't check content
-        return resolve('看起來還沒下載完成\n如真的怪怪的，請至群組提出');
-      }
-
-      downloadZip(lid)
-      .catch((err) => {
-        return reject(err);
-      })
-      .then(() => {
-        pendingStickers[lid] = {
-          msg: msg,
-          deleting: true
-        };
-
-        return reject('已排入處理佇列\n將會自動重新下載');
-      });
-    });
   });
 }
 
@@ -1201,11 +805,13 @@ async function downloadSticonItem(eid, seq) {
     const seqStr = ('000' + seq).slice(-3);
     const origin =  dir + '/origin-' + seqStr + '.png';
     const url = 'https://stickershop.line-scdn.net/sticonshop/v1/sticon/' + eid + '/iphone/' + seqStr + '.png';
-    console.log('dl Sticon Item', eid, seq, url);
+
+    console.log('dl Sticon Item', eid, seq);
+
     request(url)
     .pipe(fs.createWriteStream(origin))
     .on('error', function (err) {
-      console.error('downloadSticonItem req', error);
+      console.error('downloadSticonItem req', err);
       var text = '發生錯誤，已中斷下載\n';
       text += '編號: <code>' + eid + '</code>, ' + seqStr + '\n';
       text += '詳細報告: NodeJS <b>request</b> onError\n';
@@ -1223,65 +829,91 @@ async function downloadSticonItem(eid, seq) {
         return reject(text);
       }
       resizePng(dir, seqStr)
-      .catch((error) => {
-        console.log('dl sticon res', error);
-        return reject(error.message);
-      })
       .then((sticker) => {
         return resolve(sticker);
+      })
+      .catch((err) => {
+        console.log('dl sticon res', err);
+        return reject(err.message);
       });
     });
   });
 }
 
-function uploadSticonBody(msg, eid) {
+async function uploadSticonBody(msg, eid, seq = 2) {
   const meta = JSON.parse(fs.readFileSync('files/' + eid + '/metadata', 'utf8'));
   if (meta.emoji === undefined) {
     meta.emoji = emojis[0];
   }
-  meta.error = [];
 
   if (msg.timestamp === undefined) {
     msg.timestamp = Date.now();
   }
 
-  if (meta.done === undefined) {
-    checkPack(msg, eid)
-    .catch((err) => {
-      bot1.editMessageText(err, {
-        chat_id: msg.chat.id,
-        message_id: msg.msgId,
-        parse_mode: 'HTML',
-      });
-    });
-    return;
-  }
+  const dir = 'files/' + eid;
+  for (; seq<=40; seq++) {
+    try {
+      const sticker = await downloadSticonItem(eid, seq);
 
-  for (let seq=1; seq<=40; seq++) {
-    if (Date.now() < msg.timestamp)   // Previous stickers
-      return;
-
-    if (meta.done.indexOf(seq) > -1)
-      continue;
-
-    const dir = 'files/' + eid;
-
-    downloadSticonItem(eid, seq)
-    .catch((error) => {
-      console.log('dl sticon item err', error);
-      return reject(error);
-    })
-    .then((sticker) => {
       const stickerStream = fs.createReadStream(sticker);
       const fileOptions = {
         filename: 'sean-' + eid + '-' + seq + '.png',
         contentType: 'image/png',
       };
-      bot2.addStickerToSet(109780439, meta.name, stickerStream, meta.emoji, {}, fileOptions)
-      .catch((error) => {
-        console.log('sticon add sticker to set err', error.response.body);
-        msg.timestamp = Date.now() + 9487 * 1000;
-        meta.error.push(seq);
+
+      try {
+        const result = await bot2.addStickerToSet(109780439, meta.name, stickerStream, meta.emoji, {}, fileOptions);
+
+        if (seq == 40) {
+          var text = '上傳完成!\n';
+          text += '安裝連結: <a href="https://t.me/addstickers/' + meta.name + '">' + enHTML(meta.title) + '</a>\n';
+          bot1.editMessageText(text, {
+            chat_id: msg.chat.id,
+            message_id: msg.msgId,
+            parse_mode: 'HTML',
+            reply_markup: {
+              inline_keyboard: [
+                [
+                  {
+                    text: '點我安裝',
+                    url: 'https://t.me/addstickers/' + meta.name
+                  },
+                  {
+                    text: '編輯表符',
+                    callback_data: 'edit_emoji_' + meta.name
+                  }
+                ],
+                [
+                  {
+                    text: '分享給朋友',
+                    url: 'https://t.me/share/url'
+                    + '?url=' + encodeURIComponent('https://t.me/addstickers/' + meta.name)
+                    + '&text=' + encodeURIComponent(meta.title + '\n剛出爐的呦~')
+                  }
+                ]
+              ]
+            }
+          });
+
+          meta.okay = true;
+          fs.writeFileSync('files/' + eid + '/metadata', JSON.stringify(meta), (error) => { if (error) console.error(error) });
+        } else {
+          var text = '上傳 <a href="https://store.line.me/emojishop/product/' + eid + '/zh-Hant">' + enHTML(meta.title) + '</a> 中...\n';
+          text += prog(seq, 40);
+          if (seq >= 30) {
+            text += '預覽連結: <a href="https://t.me/addstickers/' + meta.name + '">' + enHTML(meta.title) + '</a>\n';
+          }
+          bot1.editMessageText(text, {
+            chat_id: msg.chat.id,
+            message_id: msg.msgId,
+            parse_mode: 'HTML'
+          });
+        }
+      } catch (error) {
+        if (error.response != undefined && error.response.body != undefined)
+          console.log('sticon add sticker to set error response body', error.response.body);
+        else
+          console.log('sticon add sticker to set error', error);
 
         if (error.message.includes('user not found') || error.message.includes('bot was blocked by the user')) {
           var text = '請確定 <a href="https://t.me/' + config.botName2 + '">已於此啟動過機器人</a>\n';
@@ -1309,61 +941,11 @@ function uploadSticonBody(msg, eid) {
           console.error('created sticon set not found', eid);
           return;
         }
-      })
-      .then((result) => {
-        if (msg.timestamp > Date.now())
-          return;
-
-        if (meta.error.indexOf(seq) < 0) {
-          meta.done.push(seq);
-          fs.writeFileSync(dir + '/metadata', JSON.stringify(meta));
-
-          if (meta.done.length == 40) {
-            var text = '上傳完成!\n';
-            text += '安裝連結: <a href="https://t.me/addstickers/' + meta.name + '">' + enHTML(meta.title) + '</a>\n';
-            bot1.editMessageText(text, {
-              chat_id: msg.chat.id,
-              message_id: msg.msgId,
-              parse_mode: 'HTML',
-              reply_markup: {
-                inline_keyboard: [
-                  [
-                    {
-                      text: '點我安裝',
-                      url: 'https://t.me/addstickers/' + meta.name
-                    },
-                    {
-                      text: '編輯表符',
-                      callback_data: 'edit_emoji_' + meta.name
-                    }
-                  ],
-                  [
-                    {
-                      text: '分享給朋友',
-                      url: 'https://t.me/share/url'
-                      + '?url=' + encodeURIComponent('https://t.me/addstickers/' + meta.name)
-                      + '&text=' + encodeURIComponent(meta.title + '\n剛出爐的呦~')
-                    }
-                  ]
-                ]
-              }
-            });
-          } else {
-            var text = '上傳 <a href="https://store.line.me/emojishop/product/' + eid + '/zh-Hant">' + enHTML(meta.title) + '</a> 中...\n';
-            text += prog(meta.done.length, 40);
-            if (meta.done.length >= 30) {
-              text += '預覽連結: <a href="https://t.me/addstickers/' + meta.name + '">' + enHTML(meta.title) + '</a>\n';
-            }
-            bot1.editMessageText(text, {
-              chat_id: msg.chat.id,
-              message_id: msg.msgId,
-              parse_mode: 'HTML'
-            });
-            fs.writeFileSync(dir + '/metadata', JSON.stringify(meta));
-          }
-        }
-      });
-    });
+      } // addStickerToSet
+    } catch(error) {
+      console.log('dl sticon item err', error);
+      return;
+    }
   }
 }
 
@@ -1389,66 +971,46 @@ async function downloadSticon(msg, eid) {
           packageId: eid,
           name: 'line_' + eid.slice(-6) + '_by_' + config.botName2,
           title: cheerio.load(body)("title").text().slice(0, -23),
-          done: [],
-          error: [],
           emoji: emojis[Math.floor(Math.random() * emojis.length)]
         };
       }
 
       fs.writeFileSync(dir + '/metadata', JSON.stringify(meta));
-      console.log('dl sticon meta', meta);
 
-      if (meta.done.length > 0) {
-        console.log('turn to upld body', eid);
-        uploadSticonBody(msg, eid);
-        return;
-      }
-
-      for (seq=1; seq<=1; seq++) {
-        downloadSticonItem(eid, seq)
-        .catch((error) => {
-          console.log('dl sticon item err', error);
-          return reject(error);
+      downloadSticonItem(eid, 1)
+      .then((sticker) => {
+        const stickerStream = fs.createReadStream(sticker);
+        const fileOptions = {
+          filename: 'sean-' + eid + '-001.png',
+          contentType: 'image/png',
+        };
+        bot2.createNewStickerSet(109780439, meta.name, meta.title + "  @SeanChannel", stickerStream, meta.emoji, {}, fileOptions)
+        .then((result) => {
+          fs.writeFileSync(dir + '/metadata', JSON.stringify(meta));
+          var text = '建立 <a href="https://store.line.me/emojishop/product/' + eid + '/zh-Hant">' + enHTML(meta.title) + '</a> 中...\n';
+          bot1.editMessageText(text, {
+            chat_id: msg.chat.id,
+            message_id: msg.msgId,
+            parse_mode: 'HTML'
+          });
+          uploadSticonBody(msg, eid);
         })
-        .then((sticker) => {
-          const stickerStream = fs.createReadStream(sticker);
-          const fileOptions = {
-            filename: 'sean-' + eid + '-001.png',
-            contentType: 'image/png',
-          };
-          bot2.createNewStickerSet(109780439, meta.name, meta.title + "  @SeanChannel", stickerStream, meta.emoji, {}, fileOptions)
-          .catch((error) => {
-            console.log('sticon new set err', error.response.body);
-            msg.timestamp = Date.now() + 9487 * 1000;
-            meta.error.push(seq);
+        .catch((error) => {
+          console.log('sticon new set err', error.response.body);
 
-            if (error.message.includes('user not found') || error.message.includes('bot was blocked by the user')) {
-              var text = '請確定 <a href="https://t.me/' + config.botName2 + '">已於此啟動過機器人</a>\n';
-              bot1.editMessageText(text, {
-                chat_id: msg.chat.id,
-                message_id: msg.msgId,
-                disable_web_page_preview: true,
-                parse_mode: 'HTML'
-              });
-              return;
-            }
+          if (error.message.includes('user not found') || error.message.includes('bot was blocked by the user')) {
+            var text = '請確定 <a href="https://t.me/' + config.botName2 + '">已於此啟動過機器人</a>\n';
+            bot1.editMessageText(text, {
+              chat_id: msg.chat.id,
+              message_id: msg.msgId,
+              disable_web_page_preview: true,
+              parse_mode: 'HTML'
+            });
+            return;
+          }
 
-            if (error.message.includes('sticker set name is already occupied')) {
-              var text = '發生錯誤，嘗試添加至現有貼圖包\n';
-              text += '編號: <code>' + eid + '</code> \n';
-              text += '詳細報告: createNewStickerSet\n';
-              text += '<pre>' + enHTML(JSON.stringify(error)) + '</pre>';
-              bot1.editMessageText(text, {
-                chat_id: msg.chat.id,
-                message_id: msg.msgId,
-                disable_web_page_preview: true,
-                parse_mode: 'HTML'
-              });
-              uploadSticonBody(msg, eid);
-              return;
-            }
-
-            var text = '發生錯誤，已中斷下載\n';
+          if (error.message.includes('sticker set name is already occupied')) {
+            var text = '發生錯誤，嘗試添加至現有貼圖包\n';
             text += '編號: <code>' + eid + '</code> \n';
             text += '詳細報告: createNewStickerSet\n';
             text += '<pre>' + enHTML(JSON.stringify(error)) + '</pre>';
@@ -1458,31 +1020,31 @@ async function downloadSticon(msg, eid) {
               disable_web_page_preview: true,
               parse_mode: 'HTML'
             });
+            uploadSticonBody(msg, eid, 1);
+            return;
+          }
 
-            if (error.message.includes('created sticker set not found')) {
-              console.error('created sticker set not found', eid);
-              return;
-            }
-          })
-          .then((result) => {
-            if (msg.timestamp > Date.now())
-              return;
-
-            if (meta.error.indexOf(seq) < 0) {
-              meta.done = [ seq ];
-              fs.writeFileSync(dir + '/metadata', JSON.stringify(meta));
-              var text = '建立 <a href="https://store.line.me/emojishop/product/' + eid + '/zh-Hant">' + enHTML(meta.title) + '</a> 中...\n';
-              text += prog(meta.done.length, 40);
-              bot1.editMessageText(text, {
-                chat_id: msg.chat.id,
-                message_id: msg.msgId,
-                parse_mode: 'HTML'
-              });
-              uploadSticonBody(msg, eid);
-            }
+          var text = '發生錯誤，已中斷下載\n';
+          text += '編號: <code>' + eid + '</code> \n';
+          text += '詳細報告: createNewStickerSet\n';
+          text += '<pre>' + enHTML(JSON.stringify(error)) + '</pre>';
+          bot1.editMessageText(text, {
+            chat_id: msg.chat.id,
+            message_id: msg.msgId,
+            disable_web_page_preview: true,
+            parse_mode: 'HTML'
           });
+
+          if (error.message.includes('created sticker set not found')) {
+            console.error('created sticker set not found', eid);
+            return;
+          }
         });
-      }
+      })
+      .catch((error) => {
+        console.log('dl sticon item err', error);
+        return reject(error);
+      });
     });
   });
 }
